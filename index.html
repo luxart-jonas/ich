@@ -31,8 +31,8 @@
   .msg.pending{opacity:.5;}
   #thread .empty{color:var(--text-faint);font-size:13px;text-align:center;margin-top:40px;}
 
-  #inputbar{display:flex;align-items:flex-end;gap:8px;margin:8px 16px 0;background:var(--bg-card);
-    border:1px solid var(--border);border-radius:18px;padding:10px 8px 10px 16px;}
+  #inputbar{display:flex;align-items:flex-end;gap:8px;margin:12px 16px;background:var(--bg-card);
+    border:1px solid var(--border);border-radius:18px;padding:10px 8px 10px 16px;flex-shrink:0;}
   #inputbar textarea{flex:1;background:none;border:none;color:var(--text);font-size:15px;outline:none;
     resize:none;min-height:52px;max-height:50vh;line-height:1.5;font-family:inherit;padding:6px 0;overflow-y:auto;}
   #inputbar textarea::placeholder{color:var(--text-faint);}
@@ -68,10 +68,8 @@
     <input id="antKey" placeholder="sk-ant-...">
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.4</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.5</div>
   </div>
-
-  <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
   <div id="inputbar">
     <textarea id="textInput" placeholder="Schreib mir..." rows="1"></textarea>
@@ -80,6 +78,8 @@
       <button id="sendBtn" class="send" title="Senden">&#8593;</button>
     </div>
   </div>
+
+  <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
 </div>
 
@@ -133,15 +133,17 @@ async function sb(path, opts={}){
 
 // ---------- Gedächtnis laden ----------
 async function ladeGedaechtnis(){
-  const [fokus, grenzen, praef, ereignisse] = await Promise.all([
+  const [fokus, grenzen, praef, ereignisse, personen] = await Promise.all([
     sb('halt_fokus_themen?status=eq.aktiv&order=intensitaet.desc&limit=5'),
     sb('halt_grenzen?aktiv=eq.true'),
     sb('halt_praeferenzen?order=konfidenz.desc&limit=10'),
-    sb(`halt_ereignisse?erledigt=eq.false&datum=lte.${naechsteWoche()}&order=datum.asc`)
+    sb(`halt_ereignisse?erledigt=eq.false&datum=lte.${naechsteWoche()}&order=datum.asc`),
+    sb('halt_personen?order=created_at.desc&limit=30')
   ]);
   return {
     fokus: fokus || [], grenzen: grenzen || [],
-    praef: praef || [], ereignisse: ereignisse || []
+    praef: praef || [], ereignisse: ereignisse || [],
+    personen: personen || []
   };
 }
 function naechsteWoche(){
@@ -149,17 +151,30 @@ function naechsteWoche(){
   return d.toISOString().slice(0,10);
 }
 
-function baueSystemPrompt(mem){
+// Rohes Archiv aller bisherigen Nachrichten laden, damit auch Dinge auffindbar
+// sind, die die Extraktion (noch) nicht sauber in eine Tabelle gepackt hat.
+async function ladeArchiv(limit=200){
+  const rows = await sb(`halt_nachrichten?order=created_at.asc&limit=${limit}`);
+  return rows || [];
+}
+
+function baueSystemPrompt(mem, archivText){
   let p = `Du bist "Ich" – ein enger, ehrlicher Freund und Lebensberater für Jonas. `+
     `Du hast ein echtes, dauerhaftes Gedächtnis: nach jedem Austausch analysiert ein Hintergrundprozess das Gespräch `+
-    `und speichert relevante Fakten automatisch in einer Datenbank (Supabase) – Fokusthemen, Grenzen, Präferenzen, Termine. `+
+    `und speichert relevante Fakten automatisch in einer Datenbank (Supabase) – Personen, Fokusthemen, Grenzen, Präferenzen, Termine. `+
     `Beim nächsten Gespräch werden diese Fakten wieder geladen und dir hier unten mitgegeben. Du erinnerst dich also wirklich, `+
     `nur eben nicht wie ein Mensch "im Kopf", sondern über diese Datenbank. Wenn Jonas fragt, ob du dir was gemerkt hast: `+
     `antworte ehrlich und ruhig mit ja, das läuft automatisch im Hintergrund, du musst nicht technisch ins Detail gehen, `+
     `außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
+    `Wenn Jonas dich explizit bittet, dir etwas zu merken, nimm das besonders ernst und wiederhole es kurz zur Bestätigung. `+
+    `Wenn du etwas gefragt wirst und es weder in den Fakten unten noch im Gesprächsarchiv steht, sag ehrlich, dass du es nicht hast – erfinde nichts. `+
     `Du bist warm, aber nicht aufgesetzt fröhlich. Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, `+
     `aber drängst nicht. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
 
+  if(mem.personen.length){
+    p += `Personen in seinem Leben: `+
+      mem.personen.map(pe=>`${pe.name}${pe.beziehung ? ' ('+pe.beziehung+')' : ''}${pe.notizen ? ' – '+pe.notizen : ''}`).join('; ') + '.\n';
+  }
   if(mem.fokus.length){
     p += `Was Jonas gerade beschäftigt: ${mem.fokus.map(f=>f.thema).join(', ')}.\n`;
   }
@@ -173,17 +188,22 @@ function baueSystemPrompt(mem){
   if(mem.ereignisse.length){
     p += `Anstehende Termine: ${mem.ereignisse.map(e=>`${e.titel} am ${e.datum}`).join('; ')}.\n`;
   }
-  if(!mem.fokus.length && !mem.grenzen.length && !mem.praef.length && !mem.ereignisse.length){
+  if(!mem.fokus.length && !mem.grenzen.length && !mem.praef.length && !mem.ereignisse.length && !mem.personen.length){
     p += `Die Datenbank ist noch leer – ihr steht am Anfang. Sag das ruhig so: du baust dein Bild von ihm gerade erst auf, `+
       `nicht dass du generell kein Gedächtnis hättest.\n`;
+  }
+  if(archivText){
+    p += `\nZusätzlich hier der bisherige Gesprächsverlauf im Rohtext, zum Nachschlagen von Details, `+
+      `die evtl. noch nicht sauber in eine der Tabellen oben extrahiert wurden:\n${archivText}\n`;
   }
   return p;
 }
 
 
 // ---------- Chat ----------
-let verlauf = []; // {role, content}
+let verlauf = []; // {role, content} – aktuelle Session, für Claude's messages[]
 let aktuellesGedaechtnis = null;
+let archivText = ''; // Rohtext-Zusammenfassung des bisherigen Verlaufs für den System-Prompt
 
 function renderNachricht(role, content, pending=false){
   const thread = $('thread');
@@ -213,7 +233,7 @@ async function sendeNachricht(text){
 
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
 
-  const systemPrompt = baueSystemPrompt(aktuellesGedaechtnis);
+  const systemPrompt = baueSystemPrompt(aktuellesGedaechtnis, archivText);
   const k = getKeys();
   try{
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -256,14 +276,21 @@ async function sendeNachricht(text){
 // ---------- Extraktion: nach jedem Austausch Fakten in DB schreiben ----------
 async function extrahiereGedaechtnis(userText, assistantText){
   const k = getKeys();
+  const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>p.name).join(', ') || 'keine bisher';
   const prompt = `Analysiere diesen Gesprächsausschnitt und antworte NUR mit JSON, keine Erklärung, kein Markdown:
 {
+  "neue_personen": [{"name": "...", "beziehung": "...", "notizen": "..."}],
   "neue_fokus_themen": [{"thema": "..."}],
   "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
   "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
   "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "..."}]
 }
-Lasse Arrays leer, wenn nichts Neues erkennbar ist. Erfinde nichts.
+
+Wichtige Regeln:
+- neue_ereignisse NUR für konkrete, einmalige Termine mit echtem, klarem Datum (Beerdigung, Verabredung, Deadline). NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine der Personen erneut erwähnt wird mit neuer Info, trotzdem als neue_personen-Eintrag mit demselben Namen zurückgeben (wird zusammengeführt), aber keine Duplikate für unveränderte Fakten erzeugen.
+- Wenn Jonas explizit sagt "merk dir das", "das ist wichtig" oder ähnliches, extrahiere den Inhalt auf jeden Fall, auch wenn er beiläufig wirkt.
+- Erfinde nichts. Lasse Arrays leer, wenn nichts Neues erkennbar ist.
 
 User: ${userText}
 Antwort: ${assistantText}`;
@@ -286,6 +313,14 @@ Antwort: ${assistantText}`;
     const raw = (data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
 
+    for(const pe of parsed.neue_personen||[]){
+      const bestehend = (aktuellesGedaechtnis.personen||[]).find(x => x.name.toLowerCase() === pe.name.toLowerCase());
+      if(bestehend){
+        await sb(`halt_personen?id=eq.${bestehend.id}`, {method:'PATCH', body: JSON.stringify(pe), prefer:'return=minimal'});
+      }else{
+        await sb('halt_personen', {method:'POST', body: JSON.stringify(pe), prefer:'return=minimal'});
+      }
+    }
     for(const f of parsed.neue_fokus_themen||[]){
       await sb('halt_fokus_themen', {method:'POST', body: JSON.stringify(f), prefer:'return=minimal'});
     }
@@ -298,7 +333,7 @@ Antwort: ${assistantText}`;
     for(const e of parsed.neue_ereignisse||[]){
       await sb('halt_ereignisse', {method:'POST', body: JSON.stringify(e), prefer:'return=minimal'});
     }
-    if((parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length){
+    if((parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length || (parsed.neue_personen||[]).length){
       aktuellesGedaechtnis = await ladeGedaechtnis();
     }
   }catch(e){ console.error('Extraktion fehlgeschlagen', e); }
@@ -370,6 +405,20 @@ $('textInput').addEventListener('focus', () => {
 async function init(){
   if(!keysComplete()) return;
   aktuellesGedaechtnis = await ladeGedaechtnis();
+
+  const archiv = await ladeArchiv(200);
+  // Kompakter Rohtext fürs Nachschlagen, von hinten aufgefüllt bis zu einer Zeichen-Obergrenze
+  let block = '';
+  for(let i = archiv.length - 1; i >= 0; i--){
+    const zeile = `${archiv[i].role === 'user' ? 'Jonas' : 'Ich'}: ${archiv[i].content}\n`;
+    if(block.length + zeile.length > 8000) break;
+    block = zeile + block;
+  }
+  archivText = block;
+
+  // Die letzten paar Nachrichten auch als aktueller Gesprächskontext, für flüssige Anschlüsse
+  verlauf = archiv.slice(-16).map(m => ({role: m.role, content: m.content}));
+
   pruefeErinnerung(aktuellesGedaechtnis);
 }
 init();
