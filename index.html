@@ -14,7 +14,7 @@
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI',sans-serif;
     -webkit-text-size-adjust:100%;}
-  #app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:0 0 12px;}
+  #app{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;padding:0 0 12px;}
 
   header{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 10px;
     border-bottom:1px solid var(--border);}
@@ -224,7 +224,11 @@ function renderNachricht(role, content, pending=false){
 
 async function sendeNachricht(text){
   if(!text.trim()) return;
-  if(!keysComplete()){ $('setup').style.display='block'; return; }
+  if(!keysComplete()){
+    $('setup').style.display='block';
+    renderNachricht('assistant', 'Es fehlt noch ein API-Key. Bitte oben rechts unter ⋯ alle drei Felder ausfüllen und Speichern klicken.');
+    return;
+  }
 
   renderNachricht('user', text);
   verlauf.push({role:'user', content:text});
@@ -252,6 +256,12 @@ async function sendeNachricht(text){
       })
     });
     const data = await res.json();
+    if(!res.ok || data.type === 'error'){
+      const meldung = data.error && data.error.message ? data.error.message : `HTTP ${res.status}`;
+      pendingEl.textContent = 'API-Fehler: ' + meldung;
+      pendingEl.classList.remove('pending');
+      return;
+    }
     const antwort = (data.content||[]).map(c=>c.text||'').join('');
     pendingEl.textContent = antwort || '...';
     pendingEl.classList.remove('pending');
@@ -261,7 +271,7 @@ async function sendeNachricht(text){
 
     extrahiereGedaechtnis(text, antwort);
   }catch(e){
-    pendingEl.textContent = 'Verbindung fehlgeschlagen.';
+    pendingEl.textContent = 'Fehler: ' + (e.message || e);
     pendingEl.classList.remove('pending');
     console.error(e);
   }
@@ -349,6 +359,9 @@ function vorlesen(text){
 // ---------- Init ----------
 $('sendBtn').onclick = () => sendeNachricht($('textInput').value);
 $('textInput').addEventListener('keydown', e => { if(e.key==='Enter') sendeNachricht($('textInput').value); });
+$('textInput').addEventListener('focus', () => {
+  setTimeout(() => $('inputbar').scrollIntoView({block:'end', behavior:'smooth'}), 300);
+});
 
 async function init(){
   if(!keysComplete()) return;
