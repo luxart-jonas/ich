@@ -68,7 +68,9 @@
     <input id="antKey" placeholder="sk-ant-...">
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.7</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.8</div>
+    <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
+    <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
   </div>
 
   <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
@@ -111,6 +113,7 @@ $('saveKeys').onclick = () => {
   $('setup').style.display = 'none';
   init();
 };
+$('vervollstaendigenBtn').onclick = () => vervollstaendigeGedaechtnis();
 if(!keysComplete()) $('setup').style.display = 'block';
 
 // ---------- Supabase REST helpers (kein SDK nötig, schlanker) ----------
@@ -266,7 +269,7 @@ async function sendeNachricht(text){
     sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'assistant', content:antwort}), prefer:'return=minimal'});
     if('speechSynthesis' in window && vorlesenAktiv) vorlesen(antwort);
 
-    extrahiereGedaechtnis(text, antwort);
+    extrahiereGedaechtnis();
   }catch(e){
     pendingEl.textContent = 'Fehler: ' + (e.message || e);
     pendingEl.classList.remove('pending');
@@ -275,10 +278,16 @@ async function sendeNachricht(text){
 }
 
 // ---------- Extraktion: nach jedem Austausch Fakten in DB schreiben ----------
-async function extrahiereGedaechtnis(userText, assistantText){
-  const k = getKeys();
-  const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>p.name).join(', ') || 'keine bisher';
-  const prompt = `Analysiere diesen Gesprächsausschnitt und antworte NUR mit JSON, keine Erklärung, kein Markdown:
+async function extrahiereGedaechtnis(){
+  // Nicht nur den letzten Austausch sehen, sondern die letzten ~8 Nachrichten als Kontext,
+  // damit Bezüge wie "mein Bruder" aufgelöst werden können, wenn der Name kurz vorher fiel.
+  const kontext = verlauf.slice(-8).map(m => `${m.role === 'user' ? 'Jonas' : 'Ich'}: ${m.content}`).join('\n');
+  await verarbeiteAusschnitt(kontext, true);
+}
+
+function baueExtraktionsPrompt(transkript, bekanntePersonen){
+  return `Hier ist ein Ausschnitt eines Gesprächs zwischen Jonas und seinem persönlichen Begleiter. `+
+    `Analysiere ihn und antworte NUR mit JSON, keine Erklärung, kein Markdown:
 {
   "neue_personen": [{"name": "...", "beziehung": "...", "notizen": "..."}],
   "neue_fokus_themen": [{"thema": "..."}],
@@ -288,15 +297,22 @@ async function extrahiereGedaechtnis(userText, assistantText){
 }
 
 Wichtige Regeln:
+- Nutze den GESAMTEN Ausschnitt als Kontext, um Bezüge aufzulösen (z.B. wenn "mein Bruder" gemeint ist, aber der Name "Ben" ein paar Zeilen vorher fiel – dann trag den echten Namen ein, nicht "Bruder").
 - neue_ereignisse NUR für konkrete, einmalige Termine mit echtem, klarem Datum (Beerdigung, Verabredung, Deadline). NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
-- Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes (z.B. "nur am selben Tag erinnern").
-- Wenn kein konkretes Datum genannt wird (z.B. "erinnere mich an die Hochzeit" ohne Datum), NICHT in neue_ereignisse aufnehmen, sondern in neue_praeferenzen als Hinweis, dass ein Termin noch ein Datum braucht.
-- Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine der Personen erneut erwähnt wird mit neuer Info, trotzdem als neue_personen-Eintrag mit demselben Namen zurückgeben (wird zusammengeführt), aber keine Duplikate für unveränderte Fakten erzeugen.
-- Wenn Jonas explizit sagt "merk dir das", "das ist wichtig" oder ähnliches, extrahiere den Inhalt auf jeden Fall, auch wenn er beiläufig wirkt.
+- Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
+- Wenn kein konkretes Datum genannt wird, NICHT in neue_ereignisse aufnehmen.
+- Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine bekannte Person unter einem allgemeinen Bezug (z.B. "mein Bruder") erneut auftaucht, aber inzwischen der Name klar ist, gib den ECHTEN Namen zurück, nicht die Bezugsbezeichnung – damit ein evtl. bestehender Platzhalter-Eintrag korrigiert werden kann.
+- Wenn Jonas explizit sagt "merk dir das", "das ist wichtig" oder ähnliches, extrahiere den Inhalt auf jeden Fall.
 - Erfinde nichts. Lasse Arrays leer, wenn nichts Neues erkennbar ist.
 
-User: ${userText}
-Antwort: ${assistantText}`;
+Gesprächsausschnitt:
+${transkript}`;
+}
+
+async function verarbeiteAusschnitt(transkript, geraeuschlos){
+  const k = getKeys();
+  const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>`${p.name} (${p.beziehung||'?'})`).join(', ') || 'keine bisher';
+  const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen);
 
   try{
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -308,16 +324,26 @@ Antwort: ${assistantText}`;
         'anthropic-dangerous-direct-browser-access':'true'
       },
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:500,
+        model:'claude-sonnet-4-6', max_tokens:800,
         messages:[{role:'user', content:prompt}]
       })
     });
     const data = await res.json();
+    if(!res.ok || data.type === 'error'){
+      console.error('Extraktion: API-Fehler', data.error);
+      return false;
+    }
     const raw = (data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
 
     for(const pe of parsed.neue_personen||[]){
-      const bestehend = (aktuellesGedaechtnis.personen||[]).find(x => x.name.toLowerCase() === pe.name.toLowerCase());
+      // Match entweder über exakten Namen ODER über eine bisher nur als Bezug gespeicherte
+      // Person mit derselben Beziehung und noch generischem Namen (Platzhalter-Fall).
+      const bestehend = (aktuellesGedaechtnis.personen||[]).find(x =>
+        x.name.toLowerCase() === pe.name.toLowerCase() ||
+        (pe.beziehung && x.beziehung && x.beziehung.toLowerCase() === pe.beziehung.toLowerCase()
+          && x.name.toLowerCase() === (x.beziehung||'').toLowerCase())
+      );
       if(bestehend){
         await sb(`halt_personen?id=eq.${bestehend.id}`, {method:'PATCH', body: JSON.stringify(pe), prefer:'return=minimal'});
       }else{
@@ -336,10 +362,42 @@ Antwort: ${assistantText}`;
     for(const e of parsed.neue_ereignisse||[]){
       await sb('halt_ereignisse', {method:'POST', body: JSON.stringify(e), prefer:'return=minimal'});
     }
-    if((parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length || (parsed.neue_personen||[]).length){
+    const hatNeues = (parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length ||
+      (parsed.neue_personen||[]).length || (parsed.neue_praeferenzen||[]).length || (parsed.neue_ereignisse||[]).length;
+    if(hatNeues){
       aktuellesGedaechtnis = await ladeGedaechtnis();
     }
-  }catch(e){ console.error('Extraktion fehlgeschlagen', e); }
+    return true;
+  }catch(e){
+    console.error('Extraktion fehlgeschlagen', e);
+    return false;
+  }
+}
+
+// ---------- Vollständige Nachbearbeitung: gesamtes Archiv rückwirkend durchgehen ----------
+async function vervollstaendigeGedaechtnis(){
+  if(!keysComplete() || !aktuellesGedaechtnis){
+    renderNachricht('assistant', 'Dafür brauche ich erst alle drei Keys gespeichert – trag sie oben ein.');
+    return;
+  }
+  const btn = $('vervollstaendigenBtn');
+  btn.disabled = true;
+  const archiv = await ladeArchiv(2000);
+  if(!archiv.length){ btn.disabled = false; return; }
+
+  const batchGroesse = 24;
+  const anzahlBatches = Math.ceil(archiv.length / batchGroesse);
+  const statusEl = renderNachricht('assistant', `Gehe das komplette Gespräch durch (0/${anzahlBatches})…`);
+
+  for(let i = 0; i < anzahlBatches; i++){
+    const batch = archiv.slice(i * batchGroesse, (i + 1) * batchGroesse);
+    const transkript = batch.map(m => `${m.role === 'user' ? 'Jonas' : 'Ich'}: ${m.content}`).join('\n');
+    await verarbeiteAusschnitt(transkript);
+    statusEl.textContent = `Gehe das komplette Gespräch durch (${i + 1}/${anzahlBatches})…`;
+  }
+
+  statusEl.textContent = 'Fertig – ich hab das ganze bisherige Gespräch nochmal durchgesehen und ergänzt, was fehlte.';
+  btn.disabled = false;
 }
 
 // ---------- Voice Input ----------
