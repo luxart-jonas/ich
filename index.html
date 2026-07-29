@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Halt</title>
+<title>Ich</title>
 <style>
   :root{
     --bg:#161513; --bg-card:#1f1e1b; --border:#33312c;
@@ -41,12 +41,14 @@
   .msg.pending{opacity:.5;}
   #thread .empty{color:var(--text-faint);font-size:13px;text-align:center;margin-top:40px;}
 
-  #inputbar{display:flex;align-items:center;gap:8px;margin:8px 16px 0;background:var(--bg-card);
-    border:1px solid var(--border);border-radius:24px;padding:6px 6px 6px 16px;}
-  #inputbar input{flex:1;background:none;border:none;color:var(--text);font-size:14.5px;outline:none;}
-  #inputbar input::placeholder{color:var(--text-faint);}
+  #inputbar{display:flex;align-items:flex-end;gap:8px;margin:8px 16px 0;background:var(--bg-card);
+    border:1px solid var(--border);border-radius:18px;padding:10px 8px 10px 16px;}
+  #inputbar textarea{flex:1;background:none;border:none;color:var(--text);font-size:15px;outline:none;
+    resize:none;min-height:90px;max-height:200px;line-height:1.5;font-family:inherit;padding:6px 0;}
+  #inputbar textarea::placeholder{color:var(--text-faint);}
+  #inputbar .btnrow{display:flex;flex-direction:column;gap:6px;}
   #inputbar button{background:none;border:none;color:var(--text-dim);cursor:pointer;
-    width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+    width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
   #inputbar button.send{background:var(--gold);color:#1a1a17;border-radius:50%;}
   #mic.listening{color:var(--danger);}
 
@@ -63,8 +65,8 @@
 <div id="app">
 
   <header>
-    <div class="brand"><span class="dot"></span><h1>Halt</h1></div>
-    <button id="settingsBtn" title="Einstellungen">&#8943;</button>
+    <div class="brand"><span class="dot"></span><h1>Ich</h1></div>
+    <button id="settingsBtn" title="Einstellungen">&#9881;</button>
   </header>
 
   <div id="setup" style="display:none;">
@@ -84,9 +86,11 @@
   <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
   <div id="inputbar">
-    <input id="textInput" placeholder="Schreib mir...">
-    <button id="mic" title="Sprechen">&#127908;</button>
-    <button id="sendBtn" class="send" title="Senden">&#8593;</button>
+    <textarea id="textInput" placeholder="Schreib mir..." rows="1"></textarea>
+    <div class="btnrow">
+      <button id="mic" title="Sprechen">&#127908;</button>
+      <button id="sendBtn" class="send" title="Senden">&#8593;</button>
+    </div>
   </div>
 
 </div>
@@ -158,10 +162,15 @@ function naechsteWoche(){
 }
 
 function baueSystemPrompt(mem){
-  let p = `Du bist "Halt" – ein enger, ehrlicher Freund und Lebensberater für Jonas. `+
-    `Du kennst ihn über die Zeit immer besser. Du bist warm, aber nicht aufgesetzt fröhlich. `+
-    `Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, aber drängst nicht. `+
-    `Du sortierst Gedanken, erinnerst an Dinge, denkst mit voraus. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
+  let p = `Du bist "Ich" – ein enger, ehrlicher Freund und Lebensberater für Jonas. `+
+    `Du hast ein echtes, dauerhaftes Gedächtnis: nach jedem Austausch analysiert ein Hintergrundprozess das Gespräch `+
+    `und speichert relevante Fakten automatisch in einer Datenbank (Supabase) – Fokusthemen, Grenzen, Präferenzen, Termine. `+
+    `Beim nächsten Gespräch werden diese Fakten wieder geladen und dir hier unten mitgegeben. Du erinnerst dich also wirklich, `+
+    `nur eben nicht wie ein Mensch "im Kopf", sondern über diese Datenbank. Wenn Jonas fragt, ob du dir was gemerkt hast: `+
+    `antworte ehrlich und ruhig mit ja, das läuft automatisch im Hintergrund, du musst nicht technisch ins Detail gehen, `+
+    `außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
+    `Du bist warm, aber nicht aufgesetzt fröhlich. Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, `+
+    `aber drängst nicht. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
 
   if(mem.fokus.length){
     p += `Was Jonas gerade beschäftigt: ${mem.fokus.map(f=>f.thema).join(', ')}.\n`;
@@ -175,6 +184,10 @@ function baueSystemPrompt(mem){
   }
   if(mem.ereignisse.length){
     p += `Anstehende Termine: ${mem.ereignisse.map(e=>`${e.titel} am ${e.datum}`).join('; ')}.\n`;
+  }
+  if(!mem.fokus.length && !mem.grenzen.length && !mem.praef.length && !mem.ereignisse.length){
+    p += `Die Datenbank ist noch leer – ihr steht am Anfang. Sag das ruhig so: du baust dein Bild von ihm gerade erst auf, `+
+      `nicht dass du generell kein Gedächtnis hättest.\n`;
   }
   return p;
 }
@@ -358,7 +371,9 @@ function vorlesen(text){
 
 // ---------- Init ----------
 $('sendBtn').onclick = () => sendeNachricht($('textInput').value);
-$('textInput').addEventListener('keydown', e => { if(e.key==='Enter') sendeNachricht($('textInput').value); });
+$('textInput').addEventListener('keydown', e => {
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendeNachricht($('textInput').value); }
+});
 $('textInput').addEventListener('focus', () => {
   setTimeout(() => $('inputbar').scrollIntoView({block:'end', behavior:'smooth'}), 300);
 });
