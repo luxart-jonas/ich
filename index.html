@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Halt</title>
+<style>
+  :root{
+    --bg:#161513; --bg-card:#1f1e1b; --border:#33312c;
+    --gold:#d4af37; --gold-soft:#c8a96e;
+    --text:#ece7dc; --text-dim:#9c9689; --text-faint:#6b665c;
+    --danger:#c4645a;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI',sans-serif;
+    -webkit-text-size-adjust:100%;}
+  #app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:0 0 12px;}
+
+  header{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 10px;
+    border-bottom:1px solid var(--border);}
+  header .brand{display:flex;align-items:center;gap:10px;}
+  header .dot{width:8px;height:8px;border-radius:50%;background:var(--gold);}
+  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.02em;}
+  header button{background:none;border:none;color:var(--text-dim);font-size:18px;cursor:pointer;}
+
+  #proactive{margin:10px 16px 0;background:var(--bg-card);border:1px solid var(--border);
+    border-left:3px solid var(--gold);border-radius:8px;padding:10px 12px;display:none;}
+  #proactive.show{display:block;}
+  #proactive .t{font-size:13px;margin:0 0 2px;color:var(--text);}
+  #proactive .s{font-size:12px;margin:0;color:var(--text-dim);}
+
+  #tags{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 0;}
+  .tag{font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);color:var(--text-dim);}
+  .tag.focus{border-color:var(--gold-soft);color:var(--gold-soft);}
+
+  #thread{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
+  .msg{max-width:82%;padding:9px 13px;border-radius:14px;font-size:14.5px;line-height:1.45;}
+  .msg.user{align-self:flex-end;background:var(--gold);color:#1a1a17;border-bottom-right-radius:3px;}
+  .msg.assistant{align-self:flex-start;background:var(--bg-card);border:1px solid var(--border);
+    border-bottom-left-radius:3px;}
+  .msg.pending{opacity:.5;}
+  #thread .empty{color:var(--text-faint);font-size:13px;text-align:center;margin-top:40px;}
+
+  #inputbar{display:flex;align-items:center;gap:8px;margin:8px 16px 0;background:var(--bg-card);
+    border:1px solid var(--border);border-radius:24px;padding:6px 6px 6px 16px;}
+  #inputbar input{flex:1;background:none;border:none;color:var(--text);font-size:14.5px;outline:none;}
+  #inputbar input::placeholder{color:var(--text-faint);}
+  #inputbar button{background:none;border:none;color:var(--text-dim);cursor:pointer;
+    width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+  #inputbar button.send{background:var(--gold);color:#1a1a17;border-radius:50%;}
+  #mic.listening{color:var(--danger);}
+
+  #setup{padding:16px;font-size:13px;color:var(--text-dim);}
+  #setup input{width:100%;background:var(--bg-card);border:1px solid var(--border);color:var(--text);
+    padding:9px 10px;border-radius:8px;margin:6px 0;font-size:13px;
+    -webkit-text-security:disc;}
+  #setup button{margin-top:6px;background:var(--gold);border:none;color:#1a1a17;padding:9px 16px;
+    border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;}
+  #setup .hint{font-size:11px;color:var(--text-faint);margin-top:8px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="brand"><span class="dot"></span><h1>Halt</h1></div>
+    <button id="settingsBtn" title="Einstellungen">&#8943;</button>
+  </header>
+
+  <div id="setup" style="display:none;">
+    <div>Supabase URL</div>
+    <input id="sbUrl" placeholder="https://ormpszktwwiahjooukjk.supabase.co">
+    <div>Supabase Anon Key</div>
+    <input id="sbKey" placeholder="anon key">
+    <div>Anthropic API Key</div>
+    <input id="antKey" placeholder="sk-ant-...">
+    <button id="saveKeys">Speichern</button>
+    <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
+  </div>
+
+  <div id="proactive"></div>
+  <div id="tags"></div>
+
+  <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
+
+  <div id="inputbar">
+    <input id="textInput" placeholder="Schreib mir...">
+    <button id="mic" title="Sprechen">&#127908;</button>
+    <button id="sendBtn" class="send" title="Senden">&#8593;</button>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ---------- Setup / Keys ----------
+function getKeys(){
+  return {
+    sbUrl: localStorage.getItem('halt_sb_url') || '',
+    sbKey: localStorage.getItem('halt_sb_key') || '',
+    antKey: localStorage.getItem('halt_ant_key') || ''
+  };
+}
+function keysComplete(){
+  const k = getKeys();
+  return k.sbUrl && k.sbKey && k.antKey;
+}
+$('settingsBtn').onclick = () => {
+  const s = $('setup');
+  s.style.display = s.style.display === 'none' ? 'block' : 'none';
+  const k = getKeys();
+  $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey; $('antKey').value = k.antKey;
+};
+$('saveKeys').onclick = () => {
+  localStorage.setItem('halt_sb_url', $('sbUrl').value.trim());
+  localStorage.setItem('halt_sb_key', $('sbKey').value.trim());
+  localStorage.setItem('halt_ant_key', $('antKey').value.trim());
+  $('setup').style.display = 'none';
+  init();
+};
+if(!keysComplete()) $('setup').style.display = 'block';
+
+// ---------- Supabase REST helpers (kein SDK nötig, schlanker) ----------
+async function sb(path, opts={}){
+  const k = getKeys();
+  const res = await fetch(`${k.sbUrl}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      'apikey': k.sbKey,
+      'Authorization': `Bearer ${k.sbKey}`,
+      'Content-Type': 'application/json',
+      'Prefer': opts.prefer || 'return=representation',
+      ...(opts.headers||{})
+    }
+  });
+  if(!res.ok){ console.error('Supabase Fehler', await res.text()); return null; }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+// ---------- Gedächtnis laden ----------
+async function ladeGedaechtnis(){
+  const [fokus, grenzen, praef, ereignisse] = await Promise.all([
+    sb('halt_fokus_themen?status=eq.aktiv&order=intensitaet.desc&limit=5'),
+    sb('halt_grenzen?aktiv=eq.true'),
+    sb('halt_praeferenzen?order=konfidenz.desc&limit=10'),
+    sb(`halt_ereignisse?erledigt=eq.false&datum=lte.${naechsteWoche()}&order=datum.asc`)
+  ]);
+  return {
+    fokus: fokus || [], grenzen: grenzen || [],
+    praef: praef || [], ereignisse: ereignisse || []
+  };
+}
+function naechsteWoche(){
+  const d = new Date(); d.setDate(d.getDate()+7);
+  return d.toISOString().slice(0,10);
+}
+
+function baueSystemPrompt(mem){
+  let p = `Du bist "Halt" – ein enger, ehrlicher Freund und Lebensberater für Jonas. `+
+    `Du kennst ihn über die Zeit immer besser. Du bist warm, aber nicht aufgesetzt fröhlich. `+
+    `Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, aber drängst nicht. `+
+    `Du sortierst Gedanken, erinnerst an Dinge, denkst mit voraus. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
+
+  if(mem.fokus.length){
+    p += `Was Jonas gerade beschäftigt: ${mem.fokus.map(f=>f.thema).join(', ')}.\n`;
+  }
+  if(mem.grenzen.length){
+    p += `Grenzen, die du respektierst (nicht erwähnen, dass du das weißt, einfach beachten): `+
+      mem.grenzen.map(g=>`${g.thema} – ${g.beobachtung}`).join('; ') + '.\n';
+  }
+  if(mem.praef.length){
+    p += `Bekannte Vorlieben im Umgang: ${mem.praef.map(p=>p.aussage).join('; ')}.\n`;
+  }
+  if(mem.ereignisse.length){
+    p += `Anstehende Termine: ${mem.ereignisse.map(e=>`${e.titel} am ${e.datum}`).join('; ')}.\n`;
+  }
+  return p;
+}
+
+// ---------- Proaktive Karte ----------
+function zeigeProaktiv(mem){
+  const el = $('proactive');
+  if(!mem.ereignisse.length){ el.classList.remove('show'); return; }
+  const naechstes = mem.ereignisse[0];
+  const tage = Math.round((new Date(naechstes.datum) - new Date())/86400000);
+  const wann = tage <= 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`;
+  el.innerHTML = `<p class="t">${naechstes.titel} – ${wann}</p>`+
+    `<p class="s">${naechstes.notizen || 'Alles vorbereitet?'}</p>`;
+  el.classList.add('show');
+}
+
+function zeigeTags(mem){
+  const el = $('tags');
+  el.innerHTML = '';
+  mem.fokus.forEach(f=>{
+    const s = document.createElement('span');
+    s.className = 'tag focus'; s.textContent = `gerade wichtig: ${f.thema}`;
+    el.appendChild(s);
+  });
+  mem.grenzen.forEach(g=>{
+    const s = document.createElement('span');
+    s.className = 'tag'; s.textContent = `Thema ${g.thema}: ${g.beobachtung}`;
+    el.appendChild(s);
+  });
+}
+
+// ---------- Chat ----------
+let verlauf = []; // {role, content}
+let aktuellesGedaechtnis = null;
+
+function renderNachricht(role, content, pending=false){
+  const thread = $('thread');
+  const empty = thread.querySelector('.empty');
+  if(empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = `msg ${role}${pending ? ' pending' : ''}`;
+  div.textContent = content;
+  thread.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
+  return div;
+}
+
+async function sendeNachricht(text){
+  if(!text.trim()) return;
+  if(!keysComplete()){ $('setup').style.display='block'; return; }
+
+  renderNachricht('user', text);
+  verlauf.push({role:'user', content:text});
+  sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'user', content:text}), prefer:'return=minimal'});
+  $('textInput').value = '';
+
+  const pendingEl = renderNachricht('assistant', 'schreibt...', true);
+
+  const systemPrompt = baueSystemPrompt(aktuellesGedaechtnis);
+  const k = getKeys();
+  try{
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': k.antKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:600,
+        system: systemPrompt,
+        messages: verlauf
+      })
+    });
+    const data = await res.json();
+    const antwort = (data.content||[]).map(c=>c.text||'').join('');
+    pendingEl.textContent = antwort || '...';
+    pendingEl.classList.remove('pending');
+    verlauf.push({role:'assistant', content:antwort});
+    sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'assistant', content:antwort}), prefer:'return=minimal'});
+    if('speechSynthesis' in window && vorlesenAktiv) vorlesen(antwort);
+
+    extrahiereGedaechtnis(text, antwort);
+  }catch(e){
+    pendingEl.textContent = 'Verbindung fehlgeschlagen.';
+    pendingEl.classList.remove('pending');
+    console.error(e);
+  }
+}
+
+// ---------- Extraktion: nach jedem Austausch Fakten in DB schreiben ----------
+async function extrahiereGedaechtnis(userText, assistantText){
+  const k = getKeys();
+  const prompt = `Analysiere diesen Gesprächsausschnitt und antworte NUR mit JSON, keine Erklärung, kein Markdown:
+{
+  "neue_fokus_themen": [{"thema": "..."}],
+  "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
+  "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
+  "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "..."}]
+}
+Lasse Arrays leer, wenn nichts Neues erkennbar ist. Erfinde nichts.
+
+User: ${userText}
+Antwort: ${assistantText}`;
+
+  try{
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': k.antKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-6', max_tokens:500,
+        messages:[{role:'user', content:prompt}]
+      })
+    });
+    const data = await res.json();
+    const raw = (data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
+    const parsed = JSON.parse(raw);
+
+    for(const f of parsed.neue_fokus_themen||[]){
+      await sb('halt_fokus_themen', {method:'POST', body: JSON.stringify(f), prefer:'return=minimal'});
+    }
+    for(const g of parsed.neue_grenzen||[]){
+      await sb('halt_grenzen', {method:'POST', body: JSON.stringify(g), prefer:'return=minimal'});
+    }
+    for(const p of parsed.neue_praeferenzen||[]){
+      await sb('halt_praeferenzen', {method:'POST', body: JSON.stringify(p), prefer:'return=minimal'});
+    }
+    for(const e of parsed.neue_ereignisse||[]){
+      await sb('halt_ereignisse', {method:'POST', body: JSON.stringify(e), prefer:'return=minimal'});
+    }
+    if((parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length){
+      aktuellesGedaechtnis = await ladeGedaechtnis();
+      zeigeTags(aktuellesGedaechtnis);
+      zeigeProaktiv(aktuellesGedaechtnis);
+    }
+  }catch(e){ console.error('Extraktion fehlgeschlagen', e); }
+}
+
+// ---------- Voice Input ----------
+let erkennung = null;
+let vorlesenAktiv = false;
+if('webkitSpeechRecognition' in window || 'SpeechRecognition' in window){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  erkennung = new SR();
+  erkennung.lang = 'de-DE';
+  erkennung.interimResults = false;
+  erkennung.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    $('textInput').value = text;
+    sendeNachricht(text);
+  };
+  erkennung.onend = () => $('mic').classList.remove('listening');
+}
+$('mic').onclick = () => {
+  if(!erkennung){ alert('Spracheingabe wird von diesem Browser nicht unterstützt.'); return; }
+  $('mic').classList.add('listening');
+  erkennung.start();
+};
+function vorlesen(text){
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'de-DE';
+  speechSynthesis.speak(u);
+}
+
+// ---------- Init ----------
+$('sendBtn').onclick = () => sendeNachricht($('textInput').value);
+$('textInput').addEventListener('keydown', e => { if(e.key==='Enter') sendeNachricht($('textInput').value); });
+
+async function init(){
+  if(!keysComplete()) return;
+  aktuellesGedaechtnis = await ladeGedaechtnis();
+  zeigeProaktiv(aktuellesGedaechtnis);
+  zeigeTags(aktuellesGedaechtnis);
+}
+init();
+</script>
+</body>
+</html>
