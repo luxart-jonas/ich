@@ -49,9 +49,23 @@
   #setup button{margin-top:6px;background:var(--gold);border:none;color:#1a1a17;padding:9px 16px;
     border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;}
   #setup .hint{font-size:11px;color:var(--text-faint);margin-top:8px;line-height:1.5;}
+
+  #layout{display:flex;justify-content:center;align-items:flex-start;min-height:100dvh;}
+  #wolke-links, #wolke-rechts{width:200px;flex-shrink:0;display:none;position:relative;padding:20px 12px;}
+  @media (min-width:900px){ #wolke-links, #wolke-rechts{display:block;} }
+  #wolke-links.aus, #wolke-rechts.aus{display:none !important;}
+  .wolke-wort{display:block;color:var(--text-dim);line-height:1.3;margin:10px 0;
+    text-align:right;word-break:break-word;}
+  #wolke-rechts .wolke-wort{text-align:left;}
+  .wolke-wort.stark{color:var(--gold-soft);font-weight:600;}
+  #wolke-close{position:absolute;top:0;right:0;background:none;border:none;color:var(--text-faint);
+    font-size:14px;cursor:pointer;padding:4px;}
+  #wolke-links #wolke-close{right:auto;left:0;}
 </style>
 </head>
 <body>
+<div id="layout">
+<div id="wolke-links"><button id="wolke-close">&#10005;</button></div>
 <div id="app">
 
   <header>
@@ -68,7 +82,8 @@
     <input id="antKey" placeholder="sk-ant-...">
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.7</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.8</div>
+    <button id="wolkeWiederAn" style="margin-top:10px;background:none;border:1px solid var(--border);color:var(--text-dim);">Wortwolke wieder einblenden</button>
   </div>
 
   <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
@@ -81,6 +96,9 @@
     </div>
   </div>
 
+</div>
+
+<div id="wolke-rechts"></div>
 </div>
 
 <script>
@@ -200,6 +218,41 @@ function baueSystemPrompt(mem, archivText){
   return p;
 }
 
+
+// ---------- Wortwolke: was Jonas gerade bewegt, in den Rand-Spalten ----------
+function wolkeIstAus(){ return localStorage.getItem('ich_wolke_aus') === '1'; }
+
+function zeigeWortwolke(mem){
+  const links = $('wolke-links'), rechts = $('wolke-rechts');
+  if(wolkeIstAus() || !mem.fokus.length){
+    links.classList.add('aus'); rechts.classList.add('aus');
+    return;
+  }
+  links.classList.remove('aus'); rechts.classList.remove('aus');
+
+  [...links.querySelectorAll('.wolke-wort')].forEach(el => el.remove());
+  rechts.innerHTML = '';
+
+  const sortiert = [...mem.fokus].sort((a,b) => b.intensitaet - a.intensitaet);
+  sortiert.forEach((f, i) => {
+    const groesse = 13 + Math.round((f.intensitaet||0.5) * 20); // 13–33px
+    const span = document.createElement('span');
+    span.className = 'wolke-wort' + (f.intensitaet >= 0.7 ? ' stark' : '');
+    span.style.fontSize = groesse + 'px';
+    span.textContent = f.thema;
+    (i % 2 === 0 ? links : rechts).appendChild(span);
+  });
+}
+
+$('wolke-close').onclick = () => {
+  localStorage.setItem('ich_wolke_aus', '1');
+  $('wolke-links').classList.add('aus');
+  $('wolke-rechts').classList.add('aus');
+};
+$('wolkeWiederAn').onclick = () => {
+  localStorage.removeItem('ich_wolke_aus');
+  if(aktuellesGedaechtnis) zeigeWortwolke(aktuellesGedaechtnis);
+};
 
 // ---------- Chat ----------
 let verlauf = []; // {role, content} – aktuelle Session, für Claude's messages[]
@@ -338,6 +391,7 @@ Antwort: ${assistantText}`;
     }
     if((parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length || (parsed.neue_personen||[]).length){
       aktuellesGedaechtnis = await ladeGedaechtnis();
+      zeigeWortwolke(aktuellesGedaechtnis);
     }
   }catch(e){ console.error('Extraktion fehlgeschlagen', e); }
 }
@@ -467,6 +521,7 @@ async function init(){
   verlauf = archiv.slice(-16).map(m => ({role: m.role, content: m.content}));
 
   pruefeErinnerung(aktuellesGedaechtnis);
+  zeigeWortwolke(aktuellesGedaechtnis);
 }
 init();
 </script>
