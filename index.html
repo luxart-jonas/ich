@@ -68,7 +68,7 @@
     <input id="antKey" placeholder="sk-ant-...">
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.6</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.7</div>
   </div>
 
   <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
@@ -167,6 +167,7 @@ function baueSystemPrompt(mem, archivText){
     `antworte ehrlich und ruhig mit ja, das läuft automatisch im Hintergrund, du musst nicht technisch ins Detail gehen, `+
     `außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
     `Wenn Jonas dich explizit bittet, dir etwas zu merken, nimm das besonders ernst und wiederhole es kurz zur Bestätigung. `+
+    `Wenn er dich bittet, ihn an etwas zu erinnern, aber kein Datum nennt, frag kurz nach dem Datum – ohne Datum kann kein Termin gesetzt werden. `+
     `Wenn du etwas gefragt wirst und es weder in den Fakten unten noch im Gesprächsarchiv steht, sag ehrlich, dass du es nicht hast – erfinde nichts. `+
     `Du bist warm, aber nicht aufgesetzt fröhlich. Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, `+
     `aber drängst nicht. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
@@ -283,11 +284,13 @@ async function extrahiereGedaechtnis(userText, assistantText){
   "neue_fokus_themen": [{"thema": "..."}],
   "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
   "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
-  "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "..."}]
+  "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "...", "erinnere_vorher": true, "erinnere_am_tag": true}]
 }
 
 Wichtige Regeln:
 - neue_ereignisse NUR für konkrete, einmalige Termine mit echtem, klarem Datum (Beerdigung, Verabredung, Deadline). NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes (z.B. "nur am selben Tag erinnern").
+- Wenn kein konkretes Datum genannt wird (z.B. "erinnere mich an die Hochzeit" ohne Datum), NICHT in neue_ereignisse aufnehmen, sondern in neue_praeferenzen als Hinweis, dass ein Termin noch ein Datum braucht.
 - Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine der Personen erneut erwähnt wird mit neuer Info, trotzdem als neue_personen-Eintrag mit demselben Namen zurückgeben (wird zusammengeführt), aber keine Duplikate für unveränderte Fakten erzeugen.
 - Wenn Jonas explizit sagt "merk dir das", "das ist wichtig" oder ähnliches, extrahiere den Inhalt auf jeden Fall, auch wenn er beiläufig wirkt.
 - Erfinde nichts. Lasse Arrays leer, wenn nichts Neues erkennbar ist.
@@ -376,15 +379,49 @@ function vorlesen(text){
   speechSynthesis.speak(u);
 }
 
-// ---------- Erinnerung als Chat-Nachricht statt Karte ----------
+// ---------- Erinnerungen als Chat-Nachricht, mit Dismiss-Button ----------
+function heuteISO(){ return new Date().toISOString().slice(0,10); }
+
 function pruefeErinnerung(mem){
-  if(!mem.ereignisse.length) return;
-  const naechstes = mem.ereignisse[0];
-  const tage = Math.round((new Date(naechstes.datum) - new Date())/86400000);
-  if(tage > 2) return; // nur wenn es bald ist
-  const wann = tage <= 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`;
-  const zusatz = naechstes.notizen ? ` ${naechstes.notizen}` : '';
-  renderNachricht('assistant', `Noch was: ${naechstes.titel} ist ${wann}.${zusatz}`);
+  const heute = heuteISO();
+  mem.ereignisse.forEach(ev => {
+    if(ev.weggeklickt_am === heute) return; // heute schon weggeklickt
+    const tage = Math.round((new Date(ev.datum) - new Date(heute)) / 86400000);
+    if(tage === 0 && ev.erinnere_am_tag !== false){
+      zeigeErinnerung(ev, 0);
+    }else if(tage === 1 && ev.erinnere_vorher !== false){
+      zeigeErinnerung(ev, 1);
+    }
+  });
+}
+
+function zeigeErinnerung(ev, tage){
+  const thread = $('thread');
+  const empty = thread.querySelector('.empty');
+  if(empty) empty.remove();
+
+  const wann = tage === 0 ? 'heute' : 'morgen';
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+
+  const text = document.createElement('div');
+  text.textContent = `Noch was: ${ev.titel} ist ${wann}.${ev.notizen ? ' ' + ev.notizen : ''}`;
+  div.appendChild(text);
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Danke für die Erinnerung';
+  btn.style.cssText = 'margin-top:8px;font-size:12px;padding:5px 12px;border-radius:20px;'+
+    'border:1px solid var(--border);background:var(--bg);color:var(--text-dim);cursor:pointer;';
+  btn.onclick = async () => {
+    await sb(`halt_ereignisse?id=eq.${ev.id}`, {
+      method:'PATCH', body: JSON.stringify({weggeklickt_am: heuteISO()}), prefer:'return=minimal'
+    });
+    div.remove();
+  };
+  div.appendChild(btn);
+
+  thread.appendChild(div);
+  thread.scrollTop = thread.scrollHeight;
 }
 
 // ---------- Textarea wächst mit dem Inhalt ----------
