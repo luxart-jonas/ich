@@ -68,8 +68,10 @@
     <input id="antKey" placeholder="sk-ant-...">
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.5</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.6</div>
   </div>
+
+  <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
   <div id="inputbar">
     <textarea id="textInput" placeholder="Schreib mir..." rows="1"></textarea>
@@ -78,8 +80,6 @@
       <button id="sendBtn" class="send" title="Senden">&#8593;</button>
     </div>
   </div>
-
-  <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
 </div>
 
@@ -346,16 +346,26 @@ if('webkitSpeechRecognition' in window || 'SpeechRecognition' in window){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   erkennung = new SR();
   erkennung.lang = 'de-DE';
-  erkennung.interimResults = false;
+  erkennung.interimResults = true;
+  erkennung.continuous = true;
+  let startText = '';
+  erkennung.onstart = () => { startText = $('textInput').value; };
   erkennung.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    $('textInput').value = text;
-    sendeNachricht(text);
+    let text = '';
+    for(let i = 0; i < e.results.length; i++){
+      text += e.results[i][0].transcript;
+    }
+    $('textInput').value = (startText ? startText + ' ' : '') + text;
+    autoGrow();
   };
   erkennung.onend = () => $('mic').classList.remove('listening');
 }
 $('mic').onclick = () => {
   if(!erkennung){ return; }
+  if($('mic').classList.contains('listening')){
+    erkennung.stop();
+    return;
+  }
   $('mic').classList.add('listening');
   erkennung.start();
 };
