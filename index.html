@@ -6,9 +6,9 @@
 <title>Ich</title>
 <style>
   :root{
-    --bg:#161513; --bg-card:#1f1e1b; --border:#33312c;
-    --gold:#d4af37; --gold-soft:#c8a96e;
-    --text:#ece7dc; --text-dim:#9c9689; --text-faint:#6b665c;
+    --bg:#faf7f1; --bg-card:#ffffff; --border:#e6e0d3;
+    --gold:#c8952f; --gold-soft:#b8873a;
+    --text:#2b2822; --text-dim:#726c5e; --text-faint:#a29c8c;
     --danger:#c4645a;
   }
   *{box-sizing:border-box;}
@@ -23,16 +23,6 @@
   header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.02em;}
   header button{background:none;border:none;color:var(--text-dim);font-size:18px;cursor:pointer;}
 
-  #proactive{margin:10px 16px 0;background:var(--bg-card);border:1px solid var(--border);
-    border-left:3px solid var(--gold);border-radius:8px;padding:10px 12px;display:none;}
-  #proactive.show{display:block;}
-  #proactive .t{font-size:13px;margin:0 0 2px;color:var(--text);}
-  #proactive .s{font-size:12px;margin:0;color:var(--text-dim);}
-
-  #tags{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 0;}
-  .tag{font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);color:var(--text-dim);}
-  .tag.focus{border-color:var(--gold-soft);color:var(--gold-soft);}
-
   #thread{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
   .msg{max-width:82%;padding:9px 13px;border-radius:14px;font-size:14.5px;line-height:1.45;}
   .msg.user{align-self:flex-end;background:var(--gold);color:#1a1a17;border-bottom-right-radius:3px;}
@@ -44,7 +34,7 @@
   #inputbar{display:flex;align-items:flex-end;gap:8px;margin:8px 16px 0;background:var(--bg-card);
     border:1px solid var(--border);border-radius:18px;padding:10px 8px 10px 16px;}
   #inputbar textarea{flex:1;background:none;border:none;color:var(--text);font-size:15px;outline:none;
-    resize:none;min-height:90px;max-height:200px;line-height:1.5;font-family:inherit;padding:6px 0;}
+    resize:none;min-height:52px;max-height:50vh;line-height:1.5;font-family:inherit;padding:6px 0;overflow-y:auto;}
   #inputbar textarea::placeholder{color:var(--text-faint);}
   #inputbar .btnrow{display:flex;flex-direction:column;gap:6px;}
   #inputbar button{background:none;border:none;color:var(--text-dim);cursor:pointer;
@@ -78,10 +68,8 @@
     <input id="antKey" placeholder="sk-ant-...">
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.4</div>
   </div>
-
-  <div id="proactive"></div>
-  <div id="tags"></div>
 
   <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
@@ -192,32 +180,6 @@ function baueSystemPrompt(mem){
   return p;
 }
 
-// ---------- Proaktive Karte ----------
-function zeigeProaktiv(mem){
-  const el = $('proactive');
-  if(!mem.ereignisse.length){ el.classList.remove('show'); return; }
-  const naechstes = mem.ereignisse[0];
-  const tage = Math.round((new Date(naechstes.datum) - new Date())/86400000);
-  const wann = tage <= 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`;
-  el.innerHTML = `<p class="t">${naechstes.titel} – ${wann}</p>`+
-    `<p class="s">${naechstes.notizen || 'Alles vorbereitet?'}</p>`;
-  el.classList.add('show');
-}
-
-function zeigeTags(mem){
-  const el = $('tags');
-  el.innerHTML = '';
-  mem.fokus.forEach(f=>{
-    const s = document.createElement('span');
-    s.className = 'tag focus'; s.textContent = `gerade wichtig: ${f.thema}`;
-    el.appendChild(s);
-  });
-  mem.grenzen.forEach(g=>{
-    const s = document.createElement('span');
-    s.className = 'tag'; s.textContent = `Thema ${g.thema}: ${g.beobachtung}`;
-    el.appendChild(s);
-  });
-}
 
 // ---------- Chat ----------
 let verlauf = []; // {role, content}
@@ -247,6 +209,7 @@ async function sendeNachricht(text){
   verlauf.push({role:'user', content:text});
   sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'user', content:text}), prefer:'return=minimal'});
   $('textInput').value = '';
+  $('textInput').style.height = 'auto';
 
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
 
@@ -337,8 +300,6 @@ Antwort: ${assistantText}`;
     }
     if((parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length){
       aktuellesGedaechtnis = await ladeGedaechtnis();
-      zeigeTags(aktuellesGedaechtnis);
-      zeigeProaktiv(aktuellesGedaechtnis);
     }
   }catch(e){ console.error('Extraktion fehlgeschlagen', e); }
 }
@@ -359,14 +320,42 @@ if('webkitSpeechRecognition' in window || 'SpeechRecognition' in window){
   erkennung.onend = () => $('mic').classList.remove('listening');
 }
 $('mic').onclick = () => {
-  if(!erkennung){ alert('Spracheingabe wird von diesem Browser nicht unterstützt.'); return; }
+  if(!erkennung){ return; }
   $('mic').classList.add('listening');
   erkennung.start();
 };
+if(!erkennung){ $('mic').style.display = 'none'; }
 function vorlesen(text){
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'de-DE';
   speechSynthesis.speak(u);
+}
+
+// ---------- Erinnerung als Chat-Nachricht statt Karte ----------
+function pruefeErinnerung(mem){
+  if(!mem.ereignisse.length) return;
+  const naechstes = mem.ereignisse[0];
+  const tage = Math.round((new Date(naechstes.datum) - new Date())/86400000);
+  if(tage > 2) return; // nur wenn es bald ist
+  const wann = tage <= 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`;
+  const zusatz = naechstes.notizen ? ` ${naechstes.notizen}` : '';
+  renderNachricht('assistant', `Noch was: ${naechstes.titel} ist ${wann}.${zusatz}`);
+}
+
+// ---------- Textarea wächst mit dem Inhalt ----------
+function autoGrow(){
+  const el = $('textInput');
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.5) + 'px';
+}
+$('textInput').addEventListener('input', autoGrow);
+
+// ---------- Tastatur auf Mobil: Eingabefeld immer sichtbar halten ----------
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', () => {
+    document.body.style.height = window.visualViewport.height + 'px';
+    window.scrollTo(0, 0);
+  });
 }
 
 // ---------- Init ----------
@@ -381,8 +370,7 @@ $('textInput').addEventListener('focus', () => {
 async function init(){
   if(!keysComplete()) return;
   aktuellesGedaechtnis = await ladeGedaechtnis();
-  zeigeProaktiv(aktuellesGedaechtnis);
-  zeigeTags(aktuellesGedaechtnis);
+  pruefeErinnerung(aktuellesGedaechtnis);
 }
 init();
 </script>
