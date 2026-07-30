@@ -49,6 +49,15 @@
   #setup button{margin-top:6px;background:var(--gold);border:none;color:#1a1a17;padding:9px 16px;
     border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;}
   #setup .hint{font-size:11px;color:var(--text-faint);margin-top:8px;line-height:1.5;}
+  #setup select{width:100%;background:var(--bg-card);border:1px solid var(--border);color:var(--text);
+    padding:9px 10px;border-radius:8px;margin:6px 0;font-size:13px;}
+
+  #erinnerungen{display:flex;flex-direction:column;gap:8px;padding:0 16px;margin-top:12px;}
+  .erinnerung-karte{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--gold);
+    border-radius:10px;padding:11px 13px;}
+  .erinnerung-karte p{margin:0 0 8px;font-size:13.5px;line-height:1.4;}
+  .erinnerung-karte button{background:none;border:1px solid var(--border);color:var(--text-dim);
+    font-size:12px;padding:5px 12px;border-radius:20px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -64,14 +73,27 @@
     <input id="sbUrl" placeholder="https://ormpszktwwiahjooukjk.supabase.co">
     <div>Supabase Anon Key</div>
     <input id="sbKey" placeholder="anon key">
+
+    <div style="margin-top:12px;">KI-Anbieter</div>
+    <select id="anbieterSelect">
+      <option value="anthropic">Anthropic (Claude)</option>
+      <option value="groq">Groq (Llama, schneller & kostenlos)</option>
+    </select>
+
     <div>Anthropic API Key</div>
     <input id="antKey" placeholder="sk-ant-...">
+    <div>Groq API Key</div>
+    <input id="groqKey" placeholder="gsk_...">
+    <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben.</div>
+
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.8</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.9</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
   </div>
+
+  <div id="erinnerungen"></div>
 
   <div id="thread"><div class="empty">Schreib mir, was los ist.</div></div>
 
@@ -93,28 +115,75 @@ function getKeys(){
   return {
     sbUrl: localStorage.getItem('halt_sb_url') || '',
     sbKey: localStorage.getItem('halt_sb_key') || '',
-    antKey: localStorage.getItem('halt_ant_key') || ''
+    antKey: localStorage.getItem('halt_ant_key') || '',
+    groqKey: localStorage.getItem('halt_groq_key') || ''
   };
+}
+function aktiverAnbieter(){
+  return localStorage.getItem('halt_anbieter') || 'anthropic';
 }
 function keysComplete(){
   const k = getKeys();
-  return k.sbUrl && k.sbKey && k.antKey;
+  if(!k.sbUrl || !k.sbKey) return false;
+  return aktiverAnbieter() === 'groq' ? !!k.groqKey : !!k.antKey;
 }
 $('settingsBtn').onclick = () => {
   const s = $('setup');
   s.style.display = s.style.display === 'none' ? 'block' : 'none';
   const k = getKeys();
-  $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey; $('antKey').value = k.antKey;
+  $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey;
+  $('antKey').value = k.antKey; $('groqKey').value = k.groqKey;
+  $('anbieterSelect').value = aktiverAnbieter();
 };
 $('saveKeys').onclick = () => {
   localStorage.setItem('halt_sb_url', $('sbUrl').value.trim());
   localStorage.setItem('halt_sb_key', $('sbKey').value.trim());
   localStorage.setItem('halt_ant_key', $('antKey').value.trim());
+  localStorage.setItem('halt_groq_key', $('groqKey').value.trim());
+  localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
   $('setup').style.display = 'none';
   init();
 };
 $('vervollstaendigenBtn').onclick = () => vervollstaendigeGedaechtnis();
 if(!keysComplete()) $('setup').style.display = 'block';
+
+// ---------- Einheitlicher LLM-Aufruf, je nach gewähltem Anbieter ----------
+async function chatCompletion(systemPrompt, messages, maxTokens){
+  const k = getKeys();
+  if(aktiverAnbieter() === 'groq'){
+    const body = {
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: maxTokens,
+      messages: systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages
+    };
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${k.groqKey}`},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(!res.ok || data.error){
+      throw new Error((data.error && data.error.message) || `Groq HTTP ${res.status}`);
+    }
+    return data.choices?.[0]?.message?.content || '';
+  }else{
+    const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages };
+    if(systemPrompt) body.system = systemPrompt;
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json', 'x-api-key': k.antKey,
+        'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if(!res.ok || data.type === 'error'){
+      throw new Error((data.error && data.error.message) || `Anthropic HTTP ${res.status}`);
+    }
+    return (data.content||[]).map(c=>c.text||'').join('');
+  }
+}
 
 // ---------- Supabase REST helpers (kein SDK nötig, schlanker) ----------
 async function sb(path, opts={}){
@@ -238,31 +307,8 @@ async function sendeNachricht(text){
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
 
   const systemPrompt = baueSystemPrompt(aktuellesGedaechtnis, archivText);
-  const k = getKeys();
   try{
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key': k.antKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body: JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens:600,
-        system: systemPrompt,
-        messages: verlauf
-      })
-    });
-    const data = await res.json();
-    if(!res.ok || data.type === 'error'){
-      const meldung = data.error && data.error.message ? data.error.message : `HTTP ${res.status}`;
-      pendingEl.textContent = 'API-Fehler: ' + meldung;
-      pendingEl.classList.remove('pending');
-      return;
-    }
-    const antwort = (data.content||[]).map(c=>c.text||'').join('');
+    const antwort = await chatCompletion(systemPrompt, verlauf, 600);
     pendingEl.textContent = antwort || '...';
     pendingEl.classList.remove('pending');
     verlauf.push({role:'assistant', content:antwort});
@@ -309,31 +355,12 @@ Gesprächsausschnitt:
 ${transkript}`;
 }
 
-async function verarbeiteAusschnitt(transkript, geraeuschlos){
-  const k = getKeys();
+async function verarbeiteAusschnitt(transkript){
   const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>`${p.name} (${p.beziehung||'?'})`).join(', ') || 'keine bisher';
   const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen);
 
   try{
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key': k.antKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:800,
-        messages:[{role:'user', content:prompt}]
-      })
-    });
-    const data = await res.json();
-    if(!res.ok || data.type === 'error'){
-      console.error('Extraktion: API-Fehler', data.error);
-      return false;
-    }
-    const raw = (data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
+    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 800)).replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
 
     for(const pe of parsed.neue_personen||[]){
@@ -366,6 +393,7 @@ async function verarbeiteAusschnitt(transkript, geraeuschlos){
       (parsed.neue_personen||[]).length || (parsed.neue_praeferenzen||[]).length || (parsed.neue_ereignisse||[]).length;
     if(hatNeues){
       aktuellesGedaechtnis = await ladeGedaechtnis();
+      pruefeErinnerung(aktuellesGedaechtnis);
     }
     return true;
   }catch(e){
@@ -437,13 +465,15 @@ function vorlesen(text){
   speechSynthesis.speak(u);
 }
 
-// ---------- Erinnerungen als Chat-Nachricht, mit Dismiss-Button ----------
+// ---------- Erinnerungen als eigenständige Karten (kein Chat), mit Erledigt-Button ----------
 function heuteISO(){ return new Date().toISOString().slice(0,10); }
 
 function pruefeErinnerung(mem){
+  const container = $('erinnerungen');
+  container.innerHTML = '';
   const heute = heuteISO();
   mem.ereignisse.forEach(ev => {
-    if(ev.weggeklickt_am === heute) return; // heute schon weggeklickt
+    if(ev.weggeklickt_am === heute) return; // heute schon als erledigt markiert
     const tage = Math.round((new Date(ev.datum) - new Date(heute)) / 86400000);
     if(tage === 0 && ev.erinnere_am_tag !== false){
       zeigeErinnerung(ev, 0);
@@ -454,32 +484,25 @@ function pruefeErinnerung(mem){
 }
 
 function zeigeErinnerung(ev, tage){
-  const thread = $('thread');
-  const empty = thread.querySelector('.empty');
-  if(empty) empty.remove();
-
   const wann = tage === 0 ? 'heute' : 'morgen';
-  const div = document.createElement('div');
-  div.className = 'msg assistant';
+  const karte = document.createElement('div');
+  karte.className = 'erinnerung-karte';
 
-  const text = document.createElement('div');
-  text.textContent = `Noch was: ${ev.titel} ist ${wann}.${ev.notizen ? ' ' + ev.notizen : ''}`;
-  div.appendChild(text);
+  const text = document.createElement('p');
+  text.textContent = `${ev.titel} ist ${wann}.${ev.notizen ? ' ' + ev.notizen : ''}`;
+  karte.appendChild(text);
 
   const btn = document.createElement('button');
-  btn.textContent = 'Danke für die Erinnerung';
-  btn.style.cssText = 'margin-top:8px;font-size:12px;padding:5px 12px;border-radius:20px;'+
-    'border:1px solid var(--border);background:var(--bg);color:var(--text-dim);cursor:pointer;';
+  btn.textContent = 'Erledigt';
   btn.onclick = async () => {
     await sb(`halt_ereignisse?id=eq.${ev.id}`, {
       method:'PATCH', body: JSON.stringify({weggeklickt_am: heuteISO()}), prefer:'return=minimal'
     });
-    div.remove();
+    karte.remove();
   };
-  div.appendChild(btn);
+  karte.appendChild(btn);
 
-  thread.appendChild(div);
-  thread.scrollTop = thread.scrollHeight;
+  $('erinnerungen').appendChild(karte);
 }
 
 // ---------- Textarea wächst mit dem Inhalt ----------
