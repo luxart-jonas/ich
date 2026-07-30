@@ -36,6 +36,8 @@
   .msg.assistant{align-self:flex-start;background:var(--bg-card);border:1px solid var(--border);
     border-bottom-left-radius:3px;}
   .msg.pending{opacity:.5;}
+  .system-hinweis{align-self:center;font-size:11.5px;color:var(--text-faint);text-align:center;
+    padding:2px 10px;}
   #thread .empty{color:var(--text-faint);font-size:13px;text-align:center;margin-top:40px;}
 
   #inputbar{display:flex;align-items:flex-end;gap:8px;margin:12px 16px;background:var(--bg-card);
@@ -91,11 +93,11 @@
     <input id="antKey" placeholder="sk-ant-...">
     <div>Groq API Key</div>
     <input id="groqKey" placeholder="gsk_...">
-    <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben.</div>
+    <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.2</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.4</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
   </div>
@@ -154,10 +156,39 @@ $('saveKeys').onclick = () => {
 $('vervollstaendigenBtn').onclick = () => vervollstaendigeGedaechtnis();
 if(!keysComplete()) $('setup').style.display = 'block';
 
-// ---------- Einheitlicher LLM-Aufruf, je nach gewähltem Anbieter ----------
-async function chatCompletion(systemPrompt, messages, maxTokens){
+// ---------- Wetter-Tool (Open-Meteo, kein Key nötig) ----------
+async function holeWetter(ort){
+  try{
+    const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(ort)}&count=1&language=de`);
+    const geo = await geoRes.json();
+    if(!geo.results || !geo.results.length) return JSON.stringify({fehler: `Ort "${ort}" nicht gefunden`});
+    const {latitude, longitude, name, country} = geo.results[0];
+    const wRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}`+
+      `&current=temperature_2m,weather_code,wind_speed_10m,precipitation`+
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code`+
+      `&timezone=auto&forecast_days=3`);
+    const w = await wRes.json();
+    return JSON.stringify({ort: `${name}, ${country}`, aktuell: w.current, vorhersage_3_tage: w.daily});
+  }catch(e){
+    return JSON.stringify({fehler: 'Wetterabfrage fehlgeschlagen: ' + e.message});
+  }
+}
+
+const werkzeuge = [{
+  name: 'wetter_abfragen',
+  description: 'Ruft das aktuelle Wetter und eine 3-Tage-Vorhersage für einen Ort ab.',
+  input_schema: {
+    type: 'object',
+    properties: { ort: { type: 'string', description: "Ortsname, z.B. 'Rösrath' oder 'Ponta Delgada, Azoren'" } },
+    required: ['ort']
+  }
+}];
+
+// ---------- Einheitlicher LLM-Aufruf, je nach gewähltem (oder überschriebenem) Anbieter ----------
+async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride){
   const k = getKeys();
-  if(aktiverAnbieter() === 'groq'){
+  const anbieter = anbieterOverride || aktiverAnbieter();
+  if(anbieter === 'groq'){
     const body = {
       model: 'llama-3.3-70b-versatile',
       max_tokens: maxTokens,
@@ -173,6 +204,38 @@ async function chatCompletion(systemPrompt, messages, maxTokens){
       throw new Error((data.error && data.error.message) || `Groq HTTP ${res.status}`);
     }
     return data.choices?.[0]?.message?.content || '';
+  }else if(mitTools){
+    // Tool-Use-Schleife: Claude kann bei Bedarf wetter_abfragen aufrufen
+    let laufendeMessages = [...messages];
+    for(let runde = 0; runde < 3; runde++){
+      const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages: laufendeMessages, tools: werkzeuge };
+      if(systemPrompt) body.system = systemPrompt;
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json', 'x-api-key': k.antKey,
+          'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true'
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if(!res.ok || data.type === 'error'){
+        throw new Error((data.error && data.error.message) || `Anthropic HTTP ${res.status}`);
+      }
+      const toolUse = (data.content||[]).filter(c => c.type === 'tool_use');
+      if(!toolUse.length){
+        return (data.content||[]).filter(c => c.type === 'text').map(c => c.text).join('');
+      }
+      laufendeMessages.push({role:'assistant', content: data.content});
+      const toolResults = [];
+      for(const tb of toolUse){
+        let ergebnis = 'Unbekanntes Werkzeug';
+        if(tb.name === 'wetter_abfragen') ergebnis = await holeWetter(tb.input.ort);
+        toolResults.push({type:'tool_result', tool_use_id: tb.id, content: ergebnis});
+      }
+      laufendeMessages.push({role:'user', content: toolResults});
+    }
+    return 'Konnte keine Antwort erzeugen (zu viele Tool-Aufrufe hintereinander).';
   }else{
     const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages };
     if(systemPrompt) body.system = systemPrompt;
@@ -252,6 +315,9 @@ function baueSystemPrompt(mem, archivText){
     `du musst dafür nichts Technisches tun. Wenn Jonas sowas wie "erinnere mich in X Minuten an Y" sagt, bestätige das einfach knapp und zuversichtlich `+
     `(z.B. "Mach ich, in 10 Minuten meld ich mich wegen den Blumen") – behaupte NIEMALS, du könntest das nicht oder bräuchtest, dass er sich später nochmal meldet. `+
     `Wenn du etwas gefragt wirst und es weder in den Fakten unten noch im Gesprächsarchiv steht, sag ehrlich, dass du es nicht hast – erfinde nichts. `+
+    `Du hast außerdem Zugriff auf ein Werkzeug für aktuelles Wetter (wetter_abfragen) – nutze es, wenn Jonas nach dem `+
+    `Wetter, einer Vorhersage oder Bedingungen für eine Aktivität (Radtour, Wanderung etc.) an einem Ort fragt, `+
+    `statt zu sagen du hättest keinen Internetzugang. `+
     `Du bist warm, aber nicht aufgesetzt fröhlich. Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, `+
     `aber drängst nicht. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
 
@@ -305,6 +371,10 @@ function renderNachricht(role, content, pending=false){
   return div;
 }
 
+function istWetterFrage(text){
+  return /wetter|regen|sonne|sonnig|grad|vorhersage|schnee|sturm|\bwind\b|niederschlag|temperatur/i.test(text);
+}
+
 async function sendeNachricht(text){
   if(!text.trim()) return;
   if(!keysComplete()){
@@ -319,11 +389,19 @@ async function sendeNachricht(text){
   $('textInput').value = '';
   $('textInput').style.height = 'auto';
 
+  const brauchtWetterUmschaltung = istWetterFrage(text) && aktiverAnbieter() === 'groq' && getKeys().antKey;
+  if(brauchtWetterUmschaltung){
+    const hinweis = document.createElement('div');
+    hinweis.className = 'system-hinweis';
+    hinweis.textContent = '🌤️ Für die Wetterabfrage kurz auf Claude umgeschaltet';
+    $('thread').appendChild(hinweis);
+  }
+
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
 
   const systemPrompt = baueSystemPrompt(aktuellesGedaechtnis, archivText);
   try{
-    const antwort = await chatCompletion(systemPrompt, verlauf, 600);
+    const antwort = await chatCompletion(systemPrompt, verlauf, 700, true, brauchtWetterUmschaltung ? 'anthropic' : undefined);
     pendingEl.textContent = antwort || '...';
     pendingEl.classList.remove('pending');
     verlauf.push({role:'assistant', content:antwort});
