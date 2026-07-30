@@ -97,9 +97,12 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.5</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.6</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
+
+    <button id="pushAktivierenBtn" style="margin-top:14px;">Push-Benachrichtigungen aktivieren</button>
+    <div class="hint" id="pushStatus">Noch nicht aktiviert.</div>
   </div>
 
   <div id="erinnerungen"></div>
@@ -155,6 +158,61 @@ $('saveKeys').onclick = () => {
 };
 $('vervollstaendigenBtn').onclick = () => vervollstaendigeGedaechtnis();
 if(!keysComplete()) $('setup').style.display = 'block';
+
+// ---------- Push-Benachrichtigungen ----------
+const VAPID_PUBLIC_KEY = 'BJxsizDSFgI66wCWeIHfKCI3r_2l_fQXL0Qyp-JZ_wqnBP2FMeYuCVMbmYuTivb_arpq11Qzw2vPJGadHBmj9LM';
+
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function pushStatusAktualisieren(){
+  const el = $('pushStatus');
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    el.textContent = 'Dieser Browser unterstützt keine Push-Benachrichtigungen.';
+    return;
+  }
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+  el.textContent = sub ? 'Aktiviert auf diesem Gerät ✓' : 'Noch nicht aktiviert.';
+}
+
+$('pushAktivierenBtn').onclick = async () => {
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    $('pushStatus').textContent = 'Dieser Browser unterstützt keine Push-Benachrichtigungen. Auf dem iPhone: Seite erst über "Zum Home-Bildschirm" installieren, dann als App öffnen und hier nochmal versuchen.';
+    return;
+  }
+  if(!keysComplete()){
+    $('pushStatus').textContent = 'Bitte erst Supabase-Keys speichern.';
+    return;
+  }
+  try{
+    const reg = await navigator.serviceWorker.register('sw.js');
+    const erlaubnis = await Notification.requestPermission();
+    if(erlaubnis !== 'granted'){
+      $('pushStatus').textContent = 'Erlaubnis wurde nicht erteilt.';
+      return;
+    }
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+    const json = sub.toJSON();
+    await sb('halt_push_subscriptions?on_conflict=endpoint', {
+      method:'POST',
+      body: JSON.stringify({ endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth }),
+      prefer: 'resolution=merge-duplicates,return=minimal'
+    });
+    $('pushStatus').textContent = 'Aktiviert auf diesem Gerät ✓';
+  }catch(e){
+    $('pushStatus').textContent = 'Fehler: ' + e.message;
+    console.error(e);
+  }
+};
+pushStatusAktualisieren();
 
 // ---------- Wetter-Tool (Open-Meteo, kein Key nötig) ----------
 async function holeWetter(ort){
