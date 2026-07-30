@@ -88,7 +88,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 0.9</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.0</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
   </div>
@@ -205,17 +205,18 @@ async function sb(path, opts={}){
 
 // ---------- Gedächtnis laden ----------
 async function ladeGedaechtnis(){
-  const [fokus, grenzen, praef, ereignisse, personen] = await Promise.all([
+  const [fokus, grenzen, praef, ereignisse, personen, zeitErinnerungen] = await Promise.all([
     sb('halt_fokus_themen?status=eq.aktiv&order=intensitaet.desc&limit=5'),
     sb('halt_grenzen?aktiv=eq.true'),
     sb('halt_praeferenzen?order=konfidenz.desc&limit=10'),
     sb(`halt_ereignisse?erledigt=eq.false&datum=lte.${naechsteWoche()}&order=datum.asc`),
-    sb('halt_personen?order=created_at.desc&limit=30')
+    sb('halt_personen?order=created_at.desc&limit=30'),
+    sb('halt_zeit_erinnerungen?erledigt=eq.false&order=faellig_um.asc')
   ]);
   return {
     fokus: fokus || [], grenzen: grenzen || [],
     praef: praef || [], ereignisse: ereignisse || [],
-    personen: personen || []
+    personen: personen || [], zeitErinnerungen: zeitErinnerungen || []
   };
 }
 function naechsteWoche(){
@@ -339,14 +340,18 @@ function baueExtraktionsPrompt(transkript, bekanntePersonen){
   "neue_fokus_themen": [{"thema": "..."}],
   "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
   "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
-  "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "...", "erinnere_vorher": true, "erinnere_am_tag": true}]
+  "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "...", "erinnere_vorher": true, "erinnere_am_tag": true}],
+  "neue_zeit_erinnerungen": [{"text": "...", "faellig_um": "YYYY-MM-DDTHH:MM:SS"}]
 }
+
+Aktuelle Zeit (für relative Angaben wie "in 10 Minuten"): ${new Date().toISOString()}
 
 Wichtige Regeln:
 - Nutze den GESAMTEN Ausschnitt als Kontext, um Bezüge aufzulösen (z.B. wenn "mein Bruder" gemeint ist, aber der Name "Ben" ein paar Zeilen vorher fiel – dann trag den echten Namen ein, nicht "Bruder").
-- neue_ereignisse NUR für konkrete, einmalige Termine mit echtem, klarem Datum (Beerdigung, Verabredung, Deadline). NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- neue_ereignisse für Termine mit einem DATUM ohne feste Uhrzeit (Beerdigung, Deadline) – erinnert einen Tag vorher und am Tag selbst.
+- neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Rechne faellig_um als konkreten Zeitpunkt anhand der aktuellen Zeit oben aus. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen. NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
 - Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
-- Wenn kein konkretes Datum genannt wird, NICHT in neue_ereignisse aufnehmen.
+- Wenn kein konkretes Datum oder keine Uhrzeit genannt wird, nichts erfinden – Array leer lassen.
 - Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine bekannte Person unter einem allgemeinen Bezug (z.B. "mein Bruder") erneut auftaucht, aber inzwischen der Name klar ist, gib den ECHTEN Namen zurück, nicht die Bezugsbezeichnung – damit ein evtl. bestehender Platzhalter-Eintrag korrigiert werden kann.
 - Wenn Jonas explizit sagt "merk dir das", "das ist wichtig" oder ähnliches, extrahiere den Inhalt auf jeden Fall.
 - Erfinde nichts. Lasse Arrays leer, wenn nichts Neues erkennbar ist.
@@ -389,8 +394,12 @@ async function verarbeiteAusschnitt(transkript){
     for(const e of parsed.neue_ereignisse||[]){
       await sb('halt_ereignisse', {method:'POST', body: JSON.stringify(e), prefer:'return=minimal'});
     }
+    for(const z of parsed.neue_zeit_erinnerungen||[]){
+      await sb('halt_zeit_erinnerungen', {method:'POST', body: JSON.stringify(z), prefer:'return=minimal'});
+    }
     const hatNeues = (parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length ||
-      (parsed.neue_personen||[]).length || (parsed.neue_praeferenzen||[]).length || (parsed.neue_ereignisse||[]).length;
+      (parsed.neue_personen||[]).length || (parsed.neue_praeferenzen||[]).length || (parsed.neue_ereignisse||[]).length ||
+      (parsed.neue_zeit_erinnerungen||[]).length;
     if(hatNeues){
       aktuellesGedaechtnis = await ladeGedaechtnis();
       pruefeErinnerung(aktuellesGedaechtnis);
@@ -470,7 +479,7 @@ function heuteISO(){ return new Date().toISOString().slice(0,10); }
 
 function pruefeErinnerung(mem){
   const container = $('erinnerungen');
-  container.innerHTML = '';
+  [...container.querySelectorAll('[data-typ="ereignis"]')].forEach(el => el.remove());
   const heute = heuteISO();
   mem.ereignisse.forEach(ev => {
     if(ev.weggeklickt_am === heute) return; // heute schon als erledigt markiert
@@ -487,6 +496,7 @@ function zeigeErinnerung(ev, tage){
   const wann = tage === 0 ? 'heute' : 'morgen';
   const karte = document.createElement('div');
   karte.className = 'erinnerung-karte';
+  karte.dataset.typ = 'ereignis';
 
   const text = document.createElement('p');
   text.textContent = `${ev.titel} ist ${wann}.${ev.notizen ? ' ' + ev.notizen : ''}`;
@@ -504,6 +514,45 @@ function zeigeErinnerung(ev, tage){
 
   $('erinnerungen').appendChild(karte);
 }
+
+// ---------- Uhrzeitgenaue Kurzzeit-Erinnerungen ("in 10 Minuten", "um 17 Uhr") ----------
+const zeitErinnerungGezeigt = new Set();
+
+function pruefeZeitErinnerungen(mem){
+  const jetzt = new Date();
+  (mem.zeitErinnerungen||[]).forEach(z => {
+    if(zeitErinnerungGezeigt.has(z.id)) return;
+    if(new Date(z.faellig_um) <= jetzt){
+      zeitErinnerungGezeigt.add(z.id);
+      zeigeZeitErinnerung(z);
+    }
+  });
+}
+
+function zeigeZeitErinnerung(z){
+  const karte = document.createElement('div');
+  karte.className = 'erinnerung-karte';
+
+  const text = document.createElement('p');
+  text.textContent = z.text;
+  karte.appendChild(text);
+
+  const btn = document.createElement('button');
+  btn.textContent = 'Erledigt';
+  btn.onclick = async () => {
+    await sb(`halt_zeit_erinnerungen?id=eq.${z.id}`, {
+      method:'PATCH', body: JSON.stringify({erledigt:true}), prefer:'return=minimal'
+    });
+    karte.remove();
+  };
+  karte.appendChild(btn);
+
+  $('erinnerungen').appendChild(karte);
+}
+
+setInterval(() => {
+  if(aktuellesGedaechtnis) pruefeZeitErinnerungen(aktuellesGedaechtnis);
+}, 20000);
 
 // ---------- Textarea wächst mit dem Inhalt ----------
 function autoGrow(){
@@ -548,6 +597,7 @@ async function init(){
   verlauf = archiv.slice(-16).map(m => ({role: m.role, content: m.content}));
 
   pruefeErinnerung(aktuellesGedaechtnis);
+  pruefeZeitErinnerungen(aktuellesGedaechtnis);
 }
 init();
 </script>
