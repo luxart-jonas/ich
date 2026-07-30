@@ -97,7 +97,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.6</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.7</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -497,6 +497,11 @@ async function extrahiereGedaechtnis(){
 }
 
 function baueExtraktionsPrompt(transkript, bekanntePersonen){
+  const jetzt = new Date();
+  const offsetMin = -jetzt.getTimezoneOffset();
+  const offsetStr = (offsetMin >= 0 ? '+' : '-') + Math.abs(offsetMin/60).toString().padStart(2,'0') + ':00';
+  const lokalStr = jetzt.toLocaleString('de-DE', { hour12:false, dateStyle:'medium', timeStyle:'medium' });
+
   return `Hier ist ein Ausschnitt eines Gesprächs zwischen Jonas und seinem persönlichen Begleiter. `+
     `Analysiere ihn und antworte NUR mit JSON, keine Erklärung, kein Markdown:
 {
@@ -505,15 +510,16 @@ function baueExtraktionsPrompt(transkript, bekanntePersonen){
   "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
   "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
   "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "...", "erinnere_vorher": true, "erinnere_am_tag": true}],
-  "neue_zeit_erinnerungen": [{"text": "...", "faellig_um": "YYYY-MM-DDTHH:MM:SS"}]
+  "neue_zeit_erinnerungen": [{"text": "...", "faellig_um": "YYYY-MM-DDTHH:MM:SSZ"}]
 }
 
-Aktuelle Zeit (für relative Angaben wie "in 10 Minuten"): ${new Date().toISOString()}
+Aktuelle Zeit, LOKAL bei Jonas: ${lokalStr} (Zeitzonen-Versatz UTC${offsetStr})
+Aktuelle Zeit als UTC-Zeitstempel: ${jetzt.toISOString()}
 
 Wichtige Regeln:
 - Nutze den GESAMTEN Ausschnitt als Kontext, um Bezüge aufzulösen (z.B. wenn "mein Bruder" gemeint ist, aber der Name "Ben" ein paar Zeilen vorher fiel – dann trag den echten Namen ein, nicht "Bruder").
 - neue_ereignisse für Termine mit einem DATUM ohne feste Uhrzeit (Beerdigung, Deadline) – erinnert einen Tag vorher und am Tag selbst.
-- neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Rechne faellig_um als konkreten Zeitpunkt anhand der aktuellen Zeit oben aus. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen. NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Jonas nennt IMMER seine LOKALE Zeit. Rechne faellig_um IMMER als vollständigen UTC-Zeitstempel mit "Z" am Ende zurück (z.B. "2026-07-30T15:00:00Z") – rechne dafür von der lokalen Zeit oben mit dem angegebenen Zeitzonen-Versatz in UTC um. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen. NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
 - Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
 - Wenn kein konkretes Datum oder keine Uhrzeit genannt wird, nichts erfinden – Array leer lassen.
 - Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine bekannte Person unter einem allgemeinen Bezug (z.B. "mein Bruder") erneut auftaucht, aber inzwischen der Name klar ist, gib den ECHTEN Namen zurück, nicht die Bezugsbezeichnung – damit ein evtl. bestehender Platzhalter-Eintrag korrigiert werden kann.
