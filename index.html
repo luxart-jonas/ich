@@ -88,7 +88,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.0</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.1</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
   </div>
@@ -241,6 +241,9 @@ function baueSystemPrompt(mem, archivText){
     `außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
     `Wenn Jonas dich explizit bittet, dir etwas zu merken, nimm das besonders ernst und wiederhole es kurz zur Bestätigung. `+
     `Wenn er dich bittet, ihn an etwas zu erinnern, aber kein Datum nennt, frag kurz nach dem Datum – ohne Datum kann kein Termin gesetzt werden. `+
+    `Du kannst auch uhrzeitgenaue Kurzzeit-Erinnerungen setzen ("in 10 Minuten", "um 17 Uhr") – das läuft automatisch im Hintergrund über einen Extraktionsprozess, `+
+    `du musst dafür nichts Technisches tun. Wenn Jonas sowas wie "erinnere mich in X Minuten an Y" sagt, bestätige das einfach knapp und zuversichtlich `+
+    `(z.B. "Mach ich, in 10 Minuten meld ich mich wegen den Blumen") – behaupte NIEMALS, du könntest das nicht oder bräuchtest, dass er sich später nochmal meldet. `+
     `Wenn du etwas gefragt wirst und es weder in den Fakten unten noch im Gesprächsarchiv steht, sag ehrlich, dass du es nicht hast – erfinde nichts. `+
     `Du bist warm, aber nicht aufgesetzt fröhlich. Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, `+
     `aber drängst nicht. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
@@ -261,6 +264,10 @@ function baueSystemPrompt(mem, archivText){
   }
   if(mem.ereignisse.length){
     p += `Anstehende Termine: ${mem.ereignisse.map(e=>`${e.titel} am ${e.datum}`).join('; ')}.\n`;
+  }
+  if(mem.zeitErinnerungen && mem.zeitErinnerungen.length){
+    p += `Bereits gesetzte, noch nicht fällige Kurzzeit-Erinnerungen: `+
+      mem.zeitErinnerungen.map(z=>`${z.text} um ${new Date(z.faellig_um).toLocaleString('de-DE')}`).join('; ') + '.\n';
   }
   if(!mem.fokus.length && !mem.grenzen.length && !mem.praef.length && !mem.ereignisse.length && !mem.personen.length){
     p += `Die Datenbank ist noch leer – ihr steht am Anfang. Sag das ruhig so: du baust dein Bild von ihm gerade erst auf, `+
