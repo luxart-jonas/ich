@@ -97,7 +97,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.4</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.5</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
   </div>
@@ -408,7 +408,7 @@ async function sendeNachricht(text){
     sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'assistant', content:antwort}), prefer:'return=minimal'});
     if('speechSynthesis' in window && vorlesenAktiv) vorlesen(antwort);
 
-    extrahiereGedaechtnis();
+    extrahiereGgfs(text);
   }catch(e){
     pendingEl.textContent = 'Fehler: ' + (e.message || e);
     pendingEl.classList.remove('pending');
@@ -416,7 +416,21 @@ async function sendeNachricht(text){
   }
 }
 
-// ---------- Extraktion: nach jedem Austausch Fakten in DB schreiben ----------
+// Extraktion spart Anfragen: läuft sofort bei erkennbar wichtigen Signalwörtern
+// (Termine, Uhrzeiten, "merk dir"), sonst nur gebündelt alle 3 Nachrichten.
+let nachrichtenSeitExtraktion = 0;
+function brauchtSofortigeExtraktion(text){
+  return /merk dir|wichtig|erinner|termin|geburtstag|\buhr\b|minute|stunde|morgen|heute abend|\d{1,2}[:.]\d{2}|\d{1,2}\.\d{1,2}\./i.test(text);
+}
+function extrahiereGgfs(text){
+  nachrichtenSeitExtraktion++;
+  if(brauchtSofortigeExtraktion(text) || nachrichtenSeitExtraktion >= 3){
+    nachrichtenSeitExtraktion = 0;
+    extrahiereGedaechtnis();
+  }
+}
+
+// ---------- Extraktion: Fakten in DB schreiben ----------
 async function extrahiereGedaechtnis(){
   // Nicht nur den letzten Austausch sehen, sondern die letzten ~8 Nachrichten als Kontext,
   // damit Bezüge wie "mein Bruder" aufgelöst werden können, wenn der Name kurz vorher fiel.
