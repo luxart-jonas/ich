@@ -97,7 +97,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.7</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.8</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -517,9 +517,12 @@ Aktuelle Zeit, LOKAL bei Jonas: ${lokalStr} (Zeitzonen-Versatz UTC${offsetStr})
 Aktuelle Zeit als UTC-Zeitstempel: ${jetzt.toISOString()}
 
 Wichtige Regeln:
+- Die neueste Nachricht (ganz am Ende des Ausschnitts) ist die Hauptquelle für alles Neue. Ältere Nachrichten im Ausschnitt dienen NUR dazu, Bezüge aufzulösen (Namen, Zusammenhänge) – sie sind KEINE eigene Quelle für neue Erinnerungen, Termine oder Fakten, wenn sie beim letzten Durchlauf schon dagewesen sein könnten. Im Zweifel: lieber nichts extrahieren als etwas doppelt oder frei erfinden.
 - Nutze den GESAMTEN Ausschnitt als Kontext, um Bezüge aufzulösen (z.B. wenn "mein Bruder" gemeint ist, aber der Name "Ben" ein paar Zeilen vorher fiel – dann trag den echten Namen ein, nicht "Bruder").
 - neue_ereignisse für Termine mit einem DATUM ohne feste Uhrzeit (Beerdigung, Deadline) – erinnert einen Tag vorher und am Tag selbst.
-- neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Jonas nennt IMMER seine LOKALE Zeit. Rechne faellig_um IMMER als vollständigen UTC-Zeitstempel mit "Z" am Ende zurück (z.B. "2026-07-30T15:00:00Z") – rechne dafür von der lokalen Zeit oben mit dem angegebenen Zeitzonen-Versatz in UTC um. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen. NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Jonas nennt IMMER seine LOKALE Zeit. Rechne faellig_um IMMER als vollständigen UTC-Zeitstempel mit "Z" am Ende zurück (z.B. "2026-07-30T15:00:00Z") – rechne dafür von der lokalen Zeit oben mit dem angegebenen Zeitzonen-Versatz in UTC um. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen.
+- SEHR WICHTIG bei neue_zeit_erinnerungen: nur aufnehmen, wenn eine EINDEUTIGE, EXPLIZITE Bitte um eine Erinnerung mit erkennbarer Zeitangabe vorliegt (Formulierungen wie "erinnere mich an...", "erinnere mich in X Minuten an...", "merk dir für X Uhr..."). Ein einzelnes Wort, ein Test-Begriff oder ein beiläufig erwähntes Ding OHNE erkennbare Erinnerungsabsicht und OHNE eigene Zeitangabe ist KEINE Erinnerung – nicht erfinden. Erstelle pro Nachricht nur so viele Erinnerungen, wie explizit einzeln mit eigener Zeit genannt wurden – niemals zusätzliche aus anderen Wörtern im Gesprächsverlauf ableiten, nur weil sie kürzlich im Kontext auftauchten.
+- NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
 - Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
 - Wenn kein konkretes Datum oder keine Uhrzeit genannt wird, nichts erfinden – Array leer lassen.
 - Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine bekannte Person unter einem allgemeinen Bezug (z.B. "mein Bruder") erneut auftaucht, aber inzwischen der Name klar ist, gib den ECHTEN Namen zurück, nicht die Bezugsbezeichnung – damit ein evtl. bestehender Platzhalter-Eintrag korrigiert werden kann.
