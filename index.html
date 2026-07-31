@@ -107,7 +107,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.4</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.5</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -348,18 +348,20 @@ async function sb(path, opts={}){
 
 // ---------- Gedächtnis laden ----------
 async function ladeGedaechtnis(){
-  const [fokus, grenzen, praef, ereignisse, personen, zeitErinnerungen] = await Promise.all([
+  const [fokus, grenzen, praef, ereignisse, personen, zeitErinnerungen, muster] = await Promise.all([
     sb('halt_fokus_themen?status=eq.aktiv&order=intensitaet.desc&limit=5'),
     sb('halt_grenzen?aktiv=eq.true'),
     sb('halt_praeferenzen?order=konfidenz.desc&limit=10'),
     sb(`halt_ereignisse?erledigt=eq.false&datum=lte.${naechsteWoche()}&order=datum.asc`),
     sb('halt_personen?order=created_at.desc&limit=30'),
-    sb('halt_zeit_erinnerungen?erledigt=eq.false&order=faellig_um.asc')
+    sb('halt_zeit_erinnerungen?erledigt=eq.false&order=faellig_um.asc'),
+    sb('halt_muster?order=letzte_erwaehnung.desc&limit=10')
   ]);
   return {
     fokus: fokus || [], grenzen: grenzen || [],
     praef: praef || [], ereignisse: ereignisse || [],
-    personen: personen || [], zeitErinnerungen: zeitErinnerungen || []
+    personen: personen || [], zeitErinnerungen: zeitErinnerungen || [],
+    muster: muster || []
   };
 }
 function naechsteWoche(){
@@ -414,6 +416,12 @@ function baueSystemPrompt(mem, archivText){
   if(mem.zeitErinnerungen && mem.zeitErinnerungen.length){
     p += `Bereits gesetzte, noch nicht fällige Kurzzeit-Erinnerungen: `+
       mem.zeitErinnerungen.map(z=>`${z.text} um ${new Date(z.faellig_um).toLocaleString('de-DE')}`).join('; ') + '.\n';
+  }
+  if(mem.muster && mem.muster.length){
+    p += `Wiederkehrende Verhaltensmuster, die Jonas selbst als solche erkennen lassen hat: `+
+      mem.muster.map(m=>`${m.thema}${m.beobachtung ? ' – '+m.beobachtung : ''}`).join('; ') + `. `+
+      `Geh damit vorsichtig um: nicht diagnostizieren, nicht belehren, keine Statistiken oder Ratschläge aufdrängen. `+
+      `Nur ansprechen, wenn es gerade zum Gespräch passt, sonst einfach im Hinterkopf behalten.\n`;
   }
   if(!mem.fokus.length && !mem.grenzen.length && !mem.praef.length && !mem.ereignisse.length && !mem.personen.length){
     p += `Die Datenbank ist noch leer – ihr steht am Anfang. Sag das ruhig so: du baust dein Bild von ihm gerade erst auf, `+
@@ -559,7 +567,7 @@ async function extrahiereGedaechtnis(){
   await verarbeiteAusschnitt(kontext, true);
 }
 
-function baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen){
+function baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen, bekannteMuster){
   const jetzt = new Date();
   const offsetMin = -jetzt.getTimezoneOffset();
   const offsetStr = (offsetMin >= 0 ? '+' : '-') + Math.abs(offsetMin/60).toString().padStart(2,'0') + ':00';
@@ -573,7 +581,8 @@ function baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerunge
   "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
   "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
   "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "...", "erinnere_vorher": true, "erinnere_am_tag": true}],
-  "neue_zeit_erinnerungen": [{"text": "...", "faellig_um": "YYYY-MM-DDTHH:MM:SSZ"}]
+  "neue_zeit_erinnerungen": [{"text": "...", "faellig_um": "YYYY-MM-DDTHH:MM:SSZ"}],
+  "neue_muster": [{"thema": "...", "beobachtung": "...", "ausloeser": "...", "entwicklung": "..."}]
 }
 
 Aktuelle Zeit, LOKAL bei Jonas: ${lokalStr} (Zeitzonen-Versatz UTC${offsetStr})
@@ -587,6 +596,7 @@ Wichtige Regeln:
 - SEHR WICHTIG bei neue_zeit_erinnerungen: Extrahiere eine Zeit-Erinnerung NUR, wenn die Bitte darum in der ALLERLETZTEN Nachricht im Ausschnitt steht (der letzten Zeile ganz unten). Wenn eine Zeit-Erinnerung nur in einer ÄLTEREN Nachricht weiter oben im Ausschnitt vorkam, NICHT nochmal aufnehmen, selbst wenn sie noch im Kontext sichtbar ist – die wurde beim vorherigen Durchlauf bereits erfasst. Zeit-Erinnerungen sind immer an den Moment gebunden, in dem sie ausgesprochen wurden ("in 10 Minuten" ergibt nur im Moment der Aussage Sinn) – deshalb gilt hier strenger als sonst: nur die letzte Nachricht zählt als Quelle, nicht der gesamte Kontext.
 - Zusätzlich: nur aufnehmen, wenn eine EINDEUTIGE, EXPLIZITE Bitte um eine Erinnerung mit erkennbarer Zeitangabe vorliegt (Formulierungen wie "erinnere mich an...", "erinnere mich in X Minuten an...", "merk dir für X Uhr..."). Ein einzelnes Wort, ein Test-Begriff oder ein beiläufig erwähntes Ding OHNE erkennbare Erinnerungsabsicht ist KEINE Erinnerung – nicht erfinden. Erstelle pro Nachricht nur so viele Erinnerungen, wie explizit einzeln mit eigener Zeit genannt wurden.
 - NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- neue_muster NUR, wenn Jonas selbst explizit signalisiert, dass etwas wiederkehrend ist (Formulierungen wie "das ist bei mir immer so", "passiert mir öfter", "seit Monaten schon", "das kommt immer wieder"). Ein einzelnes Erwähnen eines Themas, auch wenn es ernst ist, ist KEIN Muster – das gehört stattdessen in neue_fokus_themen. Sei hier sehr zurückhaltend: im Zweifel lieber nicht anlegen. Bereits bekannte Muster: ${bekannteMuster}. Bei erneuter Erwähnung eines bekannten Musters: denselben "thema"-Namen zurückgeben, damit es aktualisiert statt dupliziert wird.
 - Bereits vorhandene, noch nicht fällige Zeit-Erinnerungen: ${bekannteErinnerungen}. Lege KEINE neue_zeit_erinnerungen an, die inhaltlich einer davon entsprechen.
 - Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
 - Wenn kein konkretes Datum oder keine Uhrzeit genannt wird, nichts erfinden – Array leer lassen.
@@ -638,7 +648,8 @@ Nachricht: ${nachricht}`;
 async function verarbeiteAusschnitt(transkript){
   const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>`${p.name} (${p.beziehung||'?'})`).join(', ') || 'keine bisher';
   const bekannteErinnerungen = (aktuellesGedaechtnis.zeitErinnerungen||[]).map(z=>z.text).join(', ') || 'keine bisher';
-  const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen);
+  const bekannteMuster = (aktuellesGedaechtnis.muster||[]).map(m=>m.thema).join(', ') || 'keine bisher';
+  const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen, bekannteMuster);
 
   try{
     const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 800)).replace(/```json|```/g,'').trim();
@@ -673,9 +684,19 @@ async function verarbeiteAusschnitt(transkript){
     for(const z of parsed.neue_zeit_erinnerungen||[]){
       await sb('halt_zeit_erinnerungen', {method:'POST', body: JSON.stringify(z), prefer:'return=minimal'});
     }
+    for(const m of parsed.neue_muster||[]){
+      const bestehend = (aktuellesGedaechtnis.muster||[]).find(x => x.thema.toLowerCase() === m.thema.toLowerCase());
+      if(bestehend){
+        await sb(`halt_muster?id=eq.${bestehend.id}`, {
+          method:'PATCH', body: JSON.stringify({...m, letzte_erwaehnung: new Date().toISOString()}), prefer:'return=minimal'
+        });
+      }else{
+        await sb('halt_muster', {method:'POST', body: JSON.stringify(m), prefer:'return=minimal'});
+      }
+    }
     const hatNeues = (parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length ||
       (parsed.neue_personen||[]).length || (parsed.neue_praeferenzen||[]).length || (parsed.neue_ereignisse||[]).length ||
-      (parsed.neue_zeit_erinnerungen||[]).length;
+      (parsed.neue_zeit_erinnerungen||[]).length || (parsed.neue_muster||[]).length;
     if(hatNeues){
       aktuellesGedaechtnis = await ladeGedaechtnis();
       pruefeErinnerung(aktuellesGedaechtnis);
