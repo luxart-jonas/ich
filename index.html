@@ -54,7 +54,6 @@
   #inputbar button{background:none;border:none;color:var(--text-dim);cursor:pointer;
     width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
   #inputbar button.send{background:var(--gold);color:#1a1a17;border-radius:50%;}
-  #mic.listening{color:var(--danger);}
 
   #setup{padding:16px;font-size:13px;color:var(--text-dim);}
   #setup input{width:100%;background:var(--bg-card);border:1px solid var(--border);color:var(--text);
@@ -83,9 +82,9 @@
   </header>
 
   <div id="modus">
-    <button id="modusErinnerung" data-modus="erinnerung">Erinnerung</button>
+    <button id="modusErinnerung" data-modus="erinnerung" class="aktiv">Erinnerung</button>
     <button id="modusAllgemein" data-modus="allgemein">Allgemein</button>
-    <button id="modusPersoenlich" data-modus="persoenlich" class="aktiv">Persönlich</button>
+    <button id="modusPersoenlich" data-modus="persoenlich">Persönlich</button>
   </div>
 
   <div id="setup" style="display:none;">
@@ -98,9 +97,7 @@
     <select id="anbieterSelect">
       <option value="anthropic">Anthropic (Claude)</option>
       <option value="groq">Groq (Llama, schneller & kostenlos)</option>
-      <option value="lokal">Lokal auf dem Handy (kostenlos, offline, langsamer)</option>
     </select>
-    <div class="hint" id="lokalHint" style="display:none;">Lädt beim ersten Mal ein ca. 2 GB großes Modell direkt in den Browser (am besten über WLAN). Danach läuft alles offline auf dem Gerät, ganz ohne Server. Braucht einen aktuellen Browser mit WebGPU (Chrome auf Android funktioniert meist, Safari/iPhone eher nicht). Qualität ist spürbar einfacher als Claude oder Groq.</div>
 
     <div>Anthropic API Key</div>
     <input id="antKey" placeholder="sk-ant-...">
@@ -110,7 +107,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.1</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.3</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -125,7 +122,6 @@
   <div id="inputbar">
     <textarea id="textInput" placeholder="Schreib mir..." rows="1"></textarea>
     <div class="btnrow">
-      <button id="mic" title="Sprechen">&#127908;</button>
       <button id="sendBtn" class="send" title="Senden">&#8593;</button>
     </div>
   </div>
@@ -145,17 +141,18 @@ function getKeys(){
   };
 }
 function aktiverAnbieter(){
-  return localStorage.getItem('halt_anbieter') || 'anthropic';
+  const gespeichert = localStorage.getItem('halt_anbieter');
+  if(!gespeichert || gespeichert === 'lokal') return 'groq';
+  return gespeichert;
 }
 function keysComplete(){
   const k = getKeys();
   if(!k.sbUrl || !k.sbKey) return false;
   if(aktiverAnbieter() === 'groq') return !!k.groqKey;
-  if(aktiverAnbieter() === 'lokal') return true; // braucht keinen externen API-Key
   return !!k.antKey;
 }
 $('anbieterSelect').addEventListener('change', () => {
-  $('lokalHint').style.display = $('anbieterSelect').value === 'lokal' ? 'block' : 'none';
+  localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
 });
 $('settingsBtn').onclick = () => {
   const s = $('setup');
@@ -164,7 +161,6 @@ $('settingsBtn').onclick = () => {
   $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey;
   $('antKey').value = k.antKey; $('groqKey').value = k.groqKey;
   $('anbieterSelect').value = aktiverAnbieter();
-  $('lokalHint').style.display = aktiverAnbieter() === 'lokal' ? 'block' : 'none';
 };
 $('saveKeys').onclick = () => {
   localStorage.setItem('halt_sb_url', $('sbUrl').value.trim());
@@ -261,38 +257,10 @@ const werkzeuge = [{
   }
 }];
 
-// ---------- Lokales Sprachmodell im Browser (WebLLM), läuft komplett offline ----------
-let lokalesEngine = null;
-let lokalStatusEl = null; // wird von sendeNachricht gesetzt, zeigt Ladefortschritt in der Chat-Blase
-
-async function ladeLokalesModell(){
-  if(lokalesEngine) return lokalesEngine;
-  if(!('gpu' in navigator)){
-    throw new Error('Dieser Browser unterstützt WebGPU nicht – lokales Modell geht hier nicht. Auf Android: aktuelles Chrome nutzen.');
-  }
-  const webllm = await import('https://esm.run/@mlc-ai/web-llm');
-  lokalesEngine = await webllm.CreateMLCEngine('Llama-3.2-3B-Instruct-q4f16_1-MLC', {
-    initProgressCallback: (p) => {
-      if(lokalStatusEl) lokalStatusEl.textContent = `Modell lädt … ${Math.round((p.progress||0)*100)}%`;
-    }
-  });
-  return lokalesEngine;
-}
-
-async function lokalChatCompletion(systemPrompt, messages, maxTokens){
-  const engine = await ladeLokalesModell();
-  const msgs = systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages;
-  const res = await engine.chat.completions.create({ messages: msgs, max_tokens: maxTokens });
-  return res.choices?.[0]?.message?.content || '';
-}
-
 // ---------- Einheitlicher LLM-Aufruf, je nach gewähltem (oder überschriebenem) Anbieter ----------
 async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride){
   const k = getKeys();
   const anbieter = anbieterOverride || aktiverAnbieter();
-  if(anbieter === 'lokal'){
-    return await lokalChatCompletion(systemPrompt, messages, maxTokens);
-  }
   if(anbieter === 'groq'){
     const body = {
       model: 'llama-3.3-70b-versatile',
@@ -477,7 +445,7 @@ function renderNachricht(role, content, pending=false){
 }
 
 // ---------- Modus: Erinnerung / Allgemein / Persönlich ----------
-let aktuellerModus = 'persoenlich';
+let aktuellerModus = 'erinnerung';
 document.querySelectorAll('#modus button').forEach(btn => {
   btn.onclick = () => {
     aktuellerModus = btn.dataset.modus;
@@ -523,8 +491,6 @@ async function sendeNachricht(text){
   }
 
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
-  lokalStatusEl = (aktiverAnbieter() === 'lokal' && !brauchtWetterUmschaltung) ? pendingEl : null;
-  if(lokalStatusEl) pendingEl.textContent = 'Modell wird vorbereitet …';
 
   const systemPrompt = aktuellerModus === 'persoenlich'
     ? baueSystemPrompt(aktuellesGedaechtnis, archivText)
@@ -731,36 +697,7 @@ async function vervollstaendigeGedaechtnis(){
 }
 
 // ---------- Voice Input ----------
-let erkennung = null;
 let vorlesenAktiv = false;
-if('webkitSpeechRecognition' in window || 'SpeechRecognition' in window){
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  erkennung = new SR();
-  erkennung.lang = 'de-DE';
-  erkennung.interimResults = true;
-  erkennung.continuous = true;
-  let startText = '';
-  erkennung.onstart = () => { startText = $('textInput').value; };
-  erkennung.onresult = (e) => {
-    let text = '';
-    for(let i = 0; i < e.results.length; i++){
-      text += e.results[i][0].transcript;
-    }
-    $('textInput').value = (startText ? startText + ' ' : '') + text;
-    autoGrow();
-  };
-  erkennung.onend = () => $('mic').classList.remove('listening');
-}
-$('mic').onclick = () => {
-  if(!erkennung){ return; }
-  if($('mic').classList.contains('listening')){
-    erkennung.stop();
-    return;
-  }
-  $('mic').classList.add('listening');
-  erkennung.start();
-};
-if(!erkennung){ $('mic').style.display = 'none'; }
 function vorlesen(text){
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'de-DE';
