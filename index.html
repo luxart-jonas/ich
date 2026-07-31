@@ -107,7 +107,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.3</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.4</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -282,7 +282,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
     let laufendeMessages = [...messages];
     for(let runde = 0; runde < 3; runde++){
       const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages: laufendeMessages, tools: werkzeuge };
-      if(systemPrompt) body.system = systemPrompt;
+      if(systemPrompt) body.system = [{ type:'text', text: systemPrompt, cache_control:{type:'ephemeral'} }];
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method:'POST',
         headers:{
@@ -311,7 +311,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
     return 'Konnte keine Antwort erzeugen (zu viele Tool-Aufrufe hintereinander).';
   }else{
     const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages };
-    if(systemPrompt) body.system = systemPrompt;
+    if(systemPrompt) body.system = [{ type:'text', text: systemPrompt, cache_control:{type:'ephemeral'} }];
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers:{
@@ -468,6 +468,18 @@ function istWetterFrage(text){
   return /wetter|regen|sonne|sonnig|grad|vorhersage|schnee|sturm|\bwind\b|niederschlag|temperatur/i.test(text);
 }
 
+function brauchtArchiv(text){
+  return /erinnerst du dich|weißt du noch|hatten wir|hab ich (dir )?(schon )?(mal )?gesagt|was hatte ich|wann (war|ist)|wie hieß|weißt du,? wer|letzte woche|letztes mal/i.test(text);
+}
+
+function filterePersonenFuerNachricht(text, personen){
+  if(!personen || !personen.length) return [];
+  const t = text.toLowerCase();
+  return personen.filter(p =>
+    t.includes(p.name.toLowerCase()) || (p.beziehung && t.includes(p.beziehung.toLowerCase()))
+  );
+}
+
 async function sendeNachricht(text){
   if(!text.trim()) return;
   if(!keysComplete()){
@@ -492,9 +504,14 @@ async function sendeNachricht(text){
 
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
 
-  const systemPrompt = aktuellerModus === 'persoenlich'
-    ? baueSystemPrompt(aktuellesGedaechtnis, archivText)
-    : baueLeichtenSystemPrompt(aktuellerModus);
+  let systemPrompt;
+  if(aktuellerModus === 'persoenlich'){
+    const schlankesGedaechtnis = { ...aktuellesGedaechtnis, personen: filterePersonenFuerNachricht(text, aktuellesGedaechtnis.personen) };
+    const archivFuerDiesenTurn = brauchtArchiv(text) ? archivText : null;
+    systemPrompt = baueSystemPrompt(schlankesGedaechtnis, archivFuerDiesenTurn);
+  }else{
+    systemPrompt = baueLeichtenSystemPrompt(aktuellerModus);
+  }
 
   // Im leichten Modus nur die aktuelle Nachricht schicken, nicht den ganzen Verlauf mit Gedächtnis-Bezug
   const nachrichtenFuerAnfrage = aktuellerModus === 'persoenlich' ? verlauf : [{role:'user', content:text}];
