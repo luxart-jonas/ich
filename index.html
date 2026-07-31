@@ -97,7 +97,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.8</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 1.9</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -496,7 +496,7 @@ async function extrahiereGedaechtnis(){
   await verarbeiteAusschnitt(kontext, true);
 }
 
-function baueExtraktionsPrompt(transkript, bekanntePersonen){
+function baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen){
   const jetzt = new Date();
   const offsetMin = -jetzt.getTimezoneOffset();
   const offsetStr = (offsetMin >= 0 ? '+' : '-') + Math.abs(offsetMin/60).toString().padStart(2,'0') + ':00';
@@ -521,8 +521,10 @@ Wichtige Regeln:
 - Nutze den GESAMTEN Ausschnitt als Kontext, um Bezüge aufzulösen (z.B. wenn "mein Bruder" gemeint ist, aber der Name "Ben" ein paar Zeilen vorher fiel – dann trag den echten Namen ein, nicht "Bruder").
 - neue_ereignisse für Termine mit einem DATUM ohne feste Uhrzeit (Beerdigung, Deadline) – erinnert einen Tag vorher und am Tag selbst.
 - neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Jonas nennt IMMER seine LOKALE Zeit. Rechne faellig_um IMMER als vollständigen UTC-Zeitstempel mit "Z" am Ende zurück (z.B. "2026-07-30T15:00:00Z") – rechne dafür von der lokalen Zeit oben mit dem angegebenen Zeitzonen-Versatz in UTC um. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen.
-- SEHR WICHTIG bei neue_zeit_erinnerungen: nur aufnehmen, wenn eine EINDEUTIGE, EXPLIZITE Bitte um eine Erinnerung mit erkennbarer Zeitangabe vorliegt (Formulierungen wie "erinnere mich an...", "erinnere mich in X Minuten an...", "merk dir für X Uhr..."). Ein einzelnes Wort, ein Test-Begriff oder ein beiläufig erwähntes Ding OHNE erkennbare Erinnerungsabsicht und OHNE eigene Zeitangabe ist KEINE Erinnerung – nicht erfinden. Erstelle pro Nachricht nur so viele Erinnerungen, wie explizit einzeln mit eigener Zeit genannt wurden – niemals zusätzliche aus anderen Wörtern im Gesprächsverlauf ableiten, nur weil sie kürzlich im Kontext auftauchten.
+- SEHR WICHTIG bei neue_zeit_erinnerungen: Extrahiere eine Zeit-Erinnerung NUR, wenn die Bitte darum in der ALLERLETZTEN Nachricht im Ausschnitt steht (der letzten Zeile ganz unten). Wenn eine Zeit-Erinnerung nur in einer ÄLTEREN Nachricht weiter oben im Ausschnitt vorkam, NICHT nochmal aufnehmen, selbst wenn sie noch im Kontext sichtbar ist – die wurde beim vorherigen Durchlauf bereits erfasst. Zeit-Erinnerungen sind immer an den Moment gebunden, in dem sie ausgesprochen wurden ("in 10 Minuten" ergibt nur im Moment der Aussage Sinn) – deshalb gilt hier strenger als sonst: nur die letzte Nachricht zählt als Quelle, nicht der gesamte Kontext.
+- Zusätzlich: nur aufnehmen, wenn eine EINDEUTIGE, EXPLIZITE Bitte um eine Erinnerung mit erkennbarer Zeitangabe vorliegt (Formulierungen wie "erinnere mich an...", "erinnere mich in X Minuten an...", "merk dir für X Uhr..."). Ein einzelnes Wort, ein Test-Begriff oder ein beiläufig erwähntes Ding OHNE erkennbare Erinnerungsabsicht ist KEINE Erinnerung – nicht erfinden. Erstelle pro Nachricht nur so viele Erinnerungen, wie explizit einzeln mit eigener Zeit genannt wurden.
 - NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
+- Bereits vorhandene, noch nicht fällige Zeit-Erinnerungen: ${bekannteErinnerungen}. Lege KEINE neue_zeit_erinnerungen an, die inhaltlich einer davon entsprechen.
 - Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
 - Wenn kein konkretes Datum oder keine Uhrzeit genannt wird, nichts erfinden – Array leer lassen.
 - Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine bekannte Person unter einem allgemeinen Bezug (z.B. "mein Bruder") erneut auftaucht, aber inzwischen der Name klar ist, gib den ECHTEN Namen zurück, nicht die Bezugsbezeichnung – damit ein evtl. bestehender Platzhalter-Eintrag korrigiert werden kann.
@@ -535,7 +537,8 @@ ${transkript}`;
 
 async function verarbeiteAusschnitt(transkript){
   const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>`${p.name} (${p.beziehung||'?'})`).join(', ') || 'keine bisher';
-  const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen);
+  const bekannteErinnerungen = (aktuellesGedaechtnis.zeitErinnerungen||[]).map(z=>z.text).join(', ') || 'keine bisher';
+  const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen);
 
   try{
     const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 800)).replace(/```json|```/g,'').trim();
