@@ -107,7 +107,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.6</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.8</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -395,7 +395,7 @@ async function ladeArchiv(limit=200){
   return rows || [];
 }
 
-function baueSystemPrompt(mem, archivText){
+function baueSystemPrompt(mem){
   let p = `Du bist "Ich" – ein enger, ehrlicher Freund und Lebensberater für Jonas. `+
     `Du hast ein echtes, dauerhaftes Gedächtnis: nach jedem Austausch analysiert ein Hintergrundprozess das Gespräch `+
     `und speichert relevante Fakten automatisch in einer Datenbank (Supabase) – Personen, Fokusthemen, Grenzen, Präferenzen, Termine. `+
@@ -446,10 +446,6 @@ function baueSystemPrompt(mem, archivText){
     p += `Die Datenbank ist noch leer – ihr steht am Anfang. Sag das ruhig so: du baust dein Bild von ihm gerade erst auf, `+
       `nicht dass du generell kein Gedächtnis hättest.\n`;
   }
-  if(archivText){
-    p += `\nZusätzlich hier der bisherige Gesprächsverlauf im Rohtext, zum Nachschlagen von Details, `+
-      `die evtl. noch nicht sauber in eine der Tabellen oben extrahiert wurden:\n${archivText}\n`;
-  }
   return p;
 }
 
@@ -457,7 +453,6 @@ function baueSystemPrompt(mem, archivText){
 // ---------- Chat ----------
 let verlauf = []; // {role, content} – aktuelle Session, für Claude's messages[]
 let aktuellesGedaechtnis = null;
-let archivText = ''; // Rohtext-Zusammenfassung des bisherigen Verlaufs für den System-Prompt
 
 function renderNachricht(role, content, pending=false){
   const thread = $('thread');
@@ -495,10 +490,6 @@ function istWetterFrage(text){
   return /wetter|regen|sonne|sonnig|grad|vorhersage|schnee|sturm|\bwind\b|niederschlag|temperatur/i.test(text);
 }
 
-function brauchtArchiv(text){
-  return /erinnerst du dich|weißt du noch|hatten wir|hab ich (dir )?(schon )?(mal )?gesagt|was hatte ich|wann (war|ist)|wie hieß|weißt du,? wer|letzte woche|letztes mal/i.test(text);
-}
-
 function filterePersonenFuerNachricht(text, personen){
   if(!personen || !personen.length) return [];
   const t = text.toLowerCase();
@@ -534,8 +525,7 @@ async function sendeNachricht(text){
   let systemPrompt;
   if(aktuellerModus === 'persoenlich'){
     const schlankesGedaechtnis = { ...aktuellesGedaechtnis, personen: filterePersonenFuerNachricht(text, aktuellesGedaechtnis.personen) };
-    const archivFuerDiesenTurn = brauchtArchiv(text) ? archivText : null;
-    systemPrompt = baueSystemPrompt(schlankesGedaechtnis, archivFuerDiesenTurn);
+    systemPrompt = baueSystemPrompt(schlankesGedaechtnis);
   }else{
     systemPrompt = baueLeichtenSystemPrompt(aktuellerModus);
   }
@@ -870,18 +860,9 @@ async function init(){
   if(!keysComplete()) return;
   aktuellesGedaechtnis = await ladeGedaechtnis();
 
-  const archiv = await ladeArchiv(200);
-  // Kompakter Rohtext fürs Nachschlagen, von hinten aufgefüllt bis zu einer Zeichen-Obergrenze
-  let block = '';
-  for(let i = archiv.length - 1; i >= 0; i--){
-    const zeile = `${archiv[i].role === 'user' ? 'Jonas' : 'Ich'}: ${archiv[i].content}\n`;
-    if(block.length + zeile.length > 8000) break;
-    block = zeile + block;
-  }
-  archivText = block;
-
-  // Die letzten paar Nachrichten auch als aktueller Gesprächskontext, für flüssige Anschlüsse
-  verlauf = archiv.slice(-16).map(m => ({role: m.role, content: m.content}));
+  // Die letzten paar Nachrichten als Gesprächskontext, für flüssige Anschlüsse innerhalb der Sitzung
+  const archiv = await ladeArchiv(16);
+  verlauf = archiv.map(m => ({role: m.role, content: m.content}));
 
   pruefeErinnerung(aktuellesGedaechtnis);
   pruefeZeitErinnerungen(aktuellesGedaechtnis);
