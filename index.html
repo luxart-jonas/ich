@@ -107,7 +107,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.5</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.6</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -184,18 +184,7 @@ function urlBase64ToUint8Array(base64String){
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }
 
-async function pushStatusAktualisieren(){
-  const el = $('pushStatus');
-  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
-    el.textContent = 'Dieser Browser unterstützt keine Push-Benachrichtigungen.';
-    return;
-  }
-  const reg = await navigator.serviceWorker.getRegistration();
-  const sub = reg ? await reg.pushManager.getSubscription() : null;
-  el.textContent = sub ? 'Aktiviert auf diesem Gerät ✓' : 'Noch nicht aktiviert.';
-}
-
-$('pushAktivierenBtn').onclick = async () => {
+async function richtePushEin(){
   if(!('serviceWorker' in navigator) || !('PushManager' in window)){
     $('pushStatus').textContent = 'Dieser Browser unterstützt keine Push-Benachrichtigungen. Auf dem iPhone: Seite erst über "Zum Home-Bildschirm" installieren, dann als App öffnen und hier nochmal versuchen.';
     return;
@@ -206,15 +195,19 @@ $('pushAktivierenBtn').onclick = async () => {
   }
   try{
     const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready; // sicherstellen, dass er wirklich aktiv ist, bevor wir abonnieren
     const erlaubnis = await Notification.requestPermission();
     if(erlaubnis !== 'granted'){
       $('pushStatus').textContent = 'Erlaubnis wurde nicht erteilt.';
       return;
     }
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-    });
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
     const json = sub.toJSON();
     await sb('halt_push_subscriptions?on_conflict=endpoint', {
       method:'POST',
@@ -222,11 +215,37 @@ $('pushAktivierenBtn').onclick = async () => {
       prefer: 'resolution=merge-duplicates,return=minimal'
     });
     $('pushStatus').textContent = 'Aktiviert auf diesem Gerät ✓';
+    return true;
   }catch(e){
     $('pushStatus').textContent = 'Fehler: ' + e.message;
     console.error(e);
+    return false;
   }
-};
+}
+
+async function pushStatusAktualisieren(){
+  const el = $('pushStatus');
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    el.textContent = 'Dieser Browser unterstützt keine Push-Benachrichtigungen.';
+    return;
+  }
+  // Service Worker immer neu registrieren (falls er zwischenzeitlich verschwunden ist) –
+  // das behebt automatisch, wenn Xiaomi/HyperOS die Registrierung im Hintergrund gekillt hat.
+  const reg = await navigator.serviceWorker.register('sw.js').catch(() => null);
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+
+  if(sub){
+    el.textContent = 'Aktiviert auf diesem Gerät ✓';
+  }else if(Notification.permission === 'granted' && keysComplete()){
+    // Erlaubnis war schon mal erteilt, aber die Anmeldung ist weg – automatisch stillschweigend reparieren
+    el.textContent = 'Wird automatisch erneuert …';
+    await richtePushEin();
+  }else{
+    el.textContent = 'Noch nicht aktiviert.';
+  }
+}
+
+$('pushAktivierenBtn').onclick = () => richtePushEin();
 pushStatusAktualisieren();
 
 // ---------- Wetter-Tool (Open-Meteo, kein Key nötig) ----------
