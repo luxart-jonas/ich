@@ -423,9 +423,16 @@ async function ruftGoogleAuf(systemPrompt, messages, maxTokens){
   };
   if(systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
 
+  // Key bewusst als Header (x-goog-api-key) statt als ?key=-Query-Parameter geschickt: Google stellt
+  // gerade von alten "AIza..."-Keys auf neue "AQ...."-Authentication-Keys um, und der Header-Weg ist
+  // dafür der von Google offiziell empfohlene, zuverlässigere Übertragungsweg für den nativen Endpunkt.
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${k.googleKey}`,
-    { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'x-goog-api-key': k.googleKey},
+      body: JSON.stringify(body)
+    }
   );
   const data = await res.json();
   if(istKontingentFehler(res.status, data)){
