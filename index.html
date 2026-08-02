@@ -55,15 +55,18 @@
     width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
   #inputbar button.send{background:var(--gold);color:#1a1a17;border-radius:50%;}
 
-  #setup{padding:16px;font-size:13px;color:var(--text-dim);}
+  #setup{padding:16px;font-size:13px;color:var(--text-dim);overflow-y:auto;max-height:78vh;}
   #setup input{width:100%;background:var(--bg-card);border:1px solid var(--border);color:var(--text);
     padding:9px 10px;border-radius:8px;margin:6px 0;font-size:13px;
     -webkit-text-security:disc;}
   #setup button{margin-top:6px;background:var(--gold);border:none;color:#1a1a17;padding:9px 16px;
     border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;}
+  #setup button.gefahr{background:var(--danger);color:#fff;}
+  #setup button.sekundaer{background:var(--bg-card);color:var(--text);border:1px solid var(--border);}
   #setup .hint{font-size:11px;color:var(--text-faint);margin-top:8px;line-height:1.5;}
   #setup select{width:100%;background:var(--bg-card);border:1px solid var(--border);color:var(--text);
     padding:9px 10px;border-radius:8px;margin:6px 0;font-size:13px;}
+  #setup hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
 
   #splash{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;
     z-index:999;opacity:0;transition:opacity .4s ease;}
@@ -81,6 +84,18 @@
   .erinnerung-karte p{margin:0 0 8px;font-size:13.5px;line-height:1.4;}
   .erinnerung-karte button{background:none;border:1px solid var(--border);color:var(--text-dim);
     font-size:12px;padding:5px 12px;border-radius:20px;cursor:pointer;}
+
+  #lebensmodellAnsicht{display:none;padding:16px;font-size:13px;color:var(--text-dim);overflow-y:auto;max-height:82vh;}
+  #lebensmodellAnsicht .lm-schliessen{background:none;border:1px solid var(--border);color:var(--text-dim);
+    font-size:12px;padding:6px 12px;border-radius:20px;cursor:pointer;margin-bottom:10px;}
+  #lebensmodellAnsicht .lm-kategorie{font-weight:600;color:var(--text);margin-top:16px;font-size:13.5px;}
+  #lebensmodellAnsicht .lm-knoten{margin:6px 0 0 4px;padding:9px 11px;background:var(--bg-card);
+    border:1px solid var(--border);border-radius:9px;}
+  #lebensmodellAnsicht .lm-titel{font-weight:600;font-size:13px;color:var(--text);}
+  #lebensmodellAnsicht .lm-meta{font-size:11px;color:var(--text-faint);margin:2px 0 5px;}
+  #lebensmodellAnsicht ul{margin:0;padding-left:16px;font-size:12.5px;}
+  #lebensmodellAnsicht .lm-zusatz{font-size:11.5px;color:var(--text-faint);margin-top:5px;}
+  #lebensmodellAnsicht .lm-stimmung{margin:6px 0 0 4px;font-size:12.5px;color:var(--text-dim);}
 </style>
 </head>
 <body>
@@ -123,13 +138,31 @@
     <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
 
     <button id="saveKeys">Speichern</button>
-    <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 3.0</div>
-    <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
-    <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
+    <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Dein Lebensmodell (Personen, Themen, Muster, Stimmungen, das komplette Gesprächsarchiv) wird ausschließlich lokal in diesem Browser gespeichert (IndexedDB) – niemals in der Cloud. Nur Termine/Erinnerungen und Push-Anmeldungen laufen weiterhin über Supabase, damit Benachrichtigungen geräteübergreifend funktionieren. Für die eigentliche Verarbeitung (Antworten, Auswertung neuer Nachrichten) werden Texte wie bisher direkt an den gewählten KI-Anbieter geschickt.</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 4.0 – lokales Lebensmodell (IndexedDB)</div>
 
-    <button id="pushAktivierenBtn" style="margin-top:14px;">Push-Benachrichtigungen aktivieren</button>
+    <hr>
+    <button id="vervollstaendigenBtn">Gedächtnis vervollständigen</button>
+    <div class="hint">Geht das komplette bisherige Gespräch (aus dem lokalen Archiv) nochmal durch und trägt im Lebensmodell nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
+
+    <button id="lebensmodellBtn" class="sekundaer">Lebensmodell ansehen</button>
+    <div class="hint">Zeigt, was die App bisher über dich (bzw. die Testperson) gelernt hat – mit Wichtigkeit, Emotion, Häufigkeit und Verfall.</div>
+
+    <hr>
+    <button id="testdatenBtn" class="sekundaer">Fiktive Testdaten laden</button>
+    <div class="hint">Ersetzt das aktuelle lokale Lebensmodell durch einen erfundenen Beispiel-Datensatz (fiktive Testperson), damit du die App ausprobieren kannst, ohne eigene Daten einzugeben. Bei allererster Nutzung wird dieser Datensatz automatisch angelegt.</div>
+
+    <button id="gehirnLoeschenBtn" class="gefahr">🧠 Gehirn löschen</button>
+    <div class="hint">Löscht dein komplettes lokales Lebensmodell und Gesprächsarchiv auf diesem Gerät unwiderruflich. Nutze das, wenn du von den Testdaten auf deine echte Nutzung umsteigen willst. Termine/Erinnerungen in der Cloud sind davon nicht betroffen.</div>
+
+    <hr>
+    <button id="pushAktivierenBtn">Push-Benachrichtigungen aktivieren</button>
     <div class="hint" id="pushStatus">Noch nicht aktiviert.</div>
+  </div>
+
+  <div id="lebensmodellAnsicht">
+    <button class="lm-schliessen" id="lebensmodellSchliessenBtn">← zurück</button>
+    <div id="lebensmodellInhalt"></div>
   </div>
 
   <div id="erinnerungen"></div>
@@ -172,6 +205,7 @@ $('anbieterSelect').addEventListener('change', () => {
   localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
 });
 $('settingsBtn').onclick = () => {
+  $('lebensmodellAnsicht').style.display = 'none';
   const s = $('setup');
   s.style.display = s.style.display === 'none' ? 'block' : 'none';
   const k = getKeys();
@@ -283,15 +317,45 @@ async function holeWetter(ort){
   }
 }
 
-const werkzeuge = [{
-  name: 'wetter_abfragen',
-  description: 'Ruft das aktuelle Wetter und eine 3-Tage-Vorhersage für einen Ort ab.',
-  input_schema: {
-    type: 'object',
-    properties: { ort: { type: 'string', description: "Ortsname, z.B. 'Rösrath' oder 'Ponta Delgada, Azoren'" } },
-    required: ['ort']
+// ---------- Archiv-Suche-Tool: gezielter Rückgriff auf Rohtexte (Ebene 1) ----------
+async function archivDurchsuchen(suchbegriff){
+  try{
+    const alle = await dbAlle('nachrichten');
+    const t = (suchbegriff||'').toLowerCase().trim();
+    if(!t) return JSON.stringify({treffer: [], hinweis: 'Kein Suchbegriff angegeben.'});
+    const treffer = alle
+      .filter(n => (n.content||'').toLowerCase().includes(t))
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+      .slice(-8);
+    if(!treffer.length) return JSON.stringify({treffer: [], hinweis: 'Keine Treffer im Archiv gefunden.'});
+    return JSON.stringify({
+      treffer: treffer.map(x => ({rolle: x.role, text: x.content, datum: x.created_at}))
+    });
+  }catch(e){
+    return JSON.stringify({fehler: 'Archivsuche fehlgeschlagen: ' + e.message});
   }
-}];
+}
+
+const werkzeuge = [
+  {
+    name: 'wetter_abfragen',
+    description: 'Ruft das aktuelle Wetter und eine 3-Tage-Vorhersage für einen Ort ab.',
+    input_schema: {
+      type: 'object',
+      properties: { ort: { type: 'string', description: "Ortsname, z.B. 'Rösrath' oder 'Ponta Delgada, Azoren'" } },
+      required: ['ort']
+    }
+  },
+  {
+    name: 'archiv_durchsuchen',
+    description: 'Durchsucht das komplette bisherige Gesprächsarchiv (Rohtexte) nach einem Begriff. Nur benutzen, wenn ein genauer alter Wortlaut oder ein Detail gebraucht wird, das nicht im Lebensmodell steht.',
+    input_schema: {
+      type: 'object',
+      properties: { suchbegriff: { type: 'string', description: "Stichwort, nach dem im Archiv gesucht werden soll" } },
+      required: ['suchbegriff']
+    }
+  }
+];
 
 // ---------- Einheitlicher LLM-Aufruf, je nach gewähltem (oder überschriebenem) Anbieter ----------
 async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride){
@@ -314,7 +378,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
     }
     return data.choices?.[0]?.message?.content || '';
   }else if(mitTools){
-    // Tool-Use-Schleife: Claude kann bei Bedarf wetter_abfragen aufrufen
+    // Tool-Use-Schleife: Claude kann bei Bedarf wetter_abfragen / archiv_durchsuchen aufrufen
     let laufendeMessages = [...messages];
     for(let runde = 0; runde < 3; runde++){
       const body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages: laufendeMessages, tools: werkzeuge };
@@ -340,6 +404,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
       for(const tb of toolUse){
         let ergebnis = 'Unbekanntes Werkzeug';
         if(tb.name === 'wetter_abfragen') ergebnis = await holeWetter(tb.input.ort);
+        else if(tb.name === 'archiv_durchsuchen') ergebnis = await archivDurchsuchen(tb.input.suchbegriff);
         toolResults.push({type:'tool_result', tool_use_id: tb.id, content: ergebnis});
       }
       laufendeMessages.push({role:'user', content: toolResults});
@@ -364,7 +429,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
   }
 }
 
-// ---------- Supabase REST helpers (kein SDK nötig, schlanker) ----------
+// ---------- Supabase REST helpers (nur noch für Termine/Erinnerungen/Push) ----------
 async function sb(path, opts={}){
   const k = getKeys();
   const res = await fetch(`${k.sbUrl}/rest/v1/${path}`, {
@@ -382,22 +447,471 @@ async function sb(path, opts={}){
   return txt ? JSON.parse(txt) : null;
 }
 
-// ---------- Gedächtnis laden ----------
+// =====================================================================
+// ---------- IndexedDB: lokales Lebensmodell (Herzstück der App) ----------
+// =====================================================================
+const DB_NAME = 'ich_lebensmodell_db';
+const DB_VERSION = 1;
+let dbInstanz = null;
+
+function oeffneDB(){
+  if(dbInstanz) return Promise.resolve(dbInstanz);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains('nachrichten')){
+        const s = db.createObjectStore('nachrichten', {keyPath:'id', autoIncrement:true});
+        s.createIndex('created_at', 'created_at');
+      }
+      if(!db.objectStoreNames.contains('knoten')){
+        const s = db.createObjectStore('knoten', {keyPath:'id', autoIncrement:true});
+        s.createIndex('parent_id', 'parent_id');
+        s.createIndex('pfad_key', 'pfad_key', {unique:true});
+      }
+      if(!db.objectStoreNames.contains('stimmungen')){
+        const s = db.createObjectStore('stimmungen', {keyPath:'id', autoIncrement:true});
+        s.createIndex('erstellt_am', 'erstellt_am');
+      }
+      if(!db.objectStoreNames.contains('meta')){
+        db.createObjectStore('meta', {keyPath:'key'});
+      }
+    };
+    req.onsuccess = (e) => { dbInstanz = e.target.result; resolve(dbInstanz); };
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function dbStore(storeName, mode='readonly'){
+  const db = await oeffneDB();
+  return db.transaction(storeName, mode).objectStore(storeName);
+}
+
+async function dbAlle(storeName){
+  const store = await dbStore(storeName);
+  return new Promise((resolve,reject)=>{
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbHinzufuegen(storeName, obj){
+  const store = await dbStore(storeName, 'readwrite');
+  return new Promise((resolve,reject)=>{
+    const req = store.add(obj);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbSetzen(storeName, obj){
+  const store = await dbStore(storeName, 'readwrite');
+  return new Promise((resolve,reject)=>{
+    const req = store.put(obj);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbLoeschenAlles(storeName){
+  const store = await dbStore(storeName, 'readwrite');
+  return new Promise((resolve,reject)=>{
+    const req = store.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbNachIndex(storeName, indexName, wert){
+  const store = await dbStore(storeName);
+  return new Promise((resolve,reject)=>{
+    const req = store.index(indexName).getAll(wert);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbHolenMeta(key){
+  const store = await dbStore('meta');
+  return new Promise((resolve,reject)=>{
+    const req = store.get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ---------- Pfad-Helfer ----------
+function pfadKey(pfad){ return pfad.map(s=>String(s).trim().toLowerCase()).join(' > '); }
+
+async function holeKnotenNachPfad(pfad){
+  const treffer = await dbNachIndex('knoten', 'pfad_key', pfadKey(pfad));
+  return treffer[0] || null;
+}
+
+async function stelleVorfahrenSicher(pfad){
+  // Stellt sicher, dass alle Pfad-Präfixe (also alles außer dem letzten Element) als "Ordner"-Knoten existieren.
+  for(let i=1;i<pfad.length;i++){
+    const teilPfad = pfad.slice(0,i);
+    const vorhanden = await holeKnotenNachPfad(teilPfad);
+    if(!vorhanden){
+      const jetzt = new Date().toISOString();
+      await dbHinzufuegen('knoten', {
+        pfad: teilPfad, pfad_key: pfadKey(teilPfad), typ:'ordner',
+        wichtigkeit:null, emotion:null, haeufigkeit:0, verfall:'nie',
+        fakten: [], ausloeser:'', entwicklung:'',
+        erstellt_am: jetzt, aktualisiert_am: jetzt
+      });
+    }
+  }
+}
+
+// Aktualisiert einen bestehenden Knoten oder legt ihn neu an. Wird sowohl von der
+// Extraktion (Merge/Increment) als auch – mit expliziten Werten – vom Testdatensatz genutzt.
+async function upsertKnoten(pfad, felder){
+  await stelleVorfahrenSicher(pfad);
+  const jetzt = new Date().toISOString();
+  const bestehend = await holeKnotenNachPfad(pfad);
+  const neueFakten = felder.neueFakten || felder.fakten || [];
+
+  if(bestehend){
+    const fakten = [...(bestehend.fakten||[])];
+    for(const f of neueFakten){
+      if(f && !fakten.some(x => x.toLowerCase() === String(f).toLowerCase())) fakten.push(f);
+    }
+    const aktualisiert = {
+      ...bestehend,
+      typ: felder.typ || bestehend.typ,
+      wichtigkeit: felder.wichtigkeit != null
+        ? Math.round((bestehend.wichtigkeit||0) * 0.4 + felder.wichtigkeit * 0.6)
+        : bestehend.wichtigkeit,
+      emotion: felder.emotion || bestehend.emotion,
+      verfall: felder.verfall || bestehend.verfall || 'normal',
+      haeufigkeit: (bestehend.haeufigkeit||0) + 1,
+      fakten,
+      ausloeser: felder.ausloeser || bestehend.ausloeser || '',
+      entwicklung: felder.entwicklung || bestehend.entwicklung || '',
+      aktualisiert_am: jetzt
+    };
+    await dbSetzen('knoten', aktualisiert);
+    return aktualisiert;
+  }else{
+    const neu = {
+      pfad, pfad_key: pfadKey(pfad),
+      typ: felder.typ || 'thema',
+      wichtigkeit: felder.wichtigkeit != null ? felder.wichtigkeit : 50,
+      emotion: felder.emotion || 'neutral',
+      verfall: felder.verfall || 'normal',
+      haeufigkeit: 1,
+      fakten: neueFakten,
+      ausloeser: felder.ausloeser || '',
+      entwicklung: felder.entwicklung || '',
+      erstellt_am: jetzt, aktualisiert_am: jetzt
+    };
+    const id = await dbHinzufuegen('knoten', neu);
+    neu.id = id;
+    return neu;
+  }
+}
+
+// ---------- Verfall / effektive Wichtigkeit ----------
+function tageSeit(iso){
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+}
+function verfallMultiplikator(knoten){
+  if(knoten.wichtigkeit == null) return 1;
+  const tage = tageSeit(knoten.aktualisiert_am);
+  switch(knoten.verfall){
+    case 'nie': return 1;
+    case 'schnell': return Math.max(0.05, 1 - tage/60);
+    case 'langsam': return Math.max(0.1, 1 - tage/1000);
+    default: return Math.max(0.05, 1 - tage/365); // 'normal'
+  }
+}
+function effektiveWichtigkeit(knoten){
+  if(knoten.wichtigkeit == null) return 0;
+  return Math.round(knoten.wichtigkeit * verfallMultiplikator(knoten));
+}
+
+// ---------- Lebensmodell als Text fürs LLM ----------
+function baueLebensmodellText(knoten){
+  const blaetter = (knoten||[]).filter(k => k.typ !== 'ordner' && k.wichtigkeit != null);
+  if(!blaetter.length) return 'Das Lebensmodell ist noch leer – ihr steht am Anfang.\n';
+
+  const nachKategorie = {};
+  for(const k of blaetter){
+    const kategorie = k.pfad[0];
+    (nachKategorie[kategorie] = nachKategorie[kategorie]||[]).push(k);
+  }
+
+  let text = '';
+  for(const kategorie of Object.keys(nachKategorie).sort()){
+    const eintraege = nachKategorie[kategorie]
+      .sort((a,b) => effektiveWichtigkeit(b) - effektiveWichtigkeit(a))
+      .slice(0, 8);
+    text += `${kategorie}:\n`;
+    for(const e of eintraege){
+      const name = e.pfad[e.pfad.length-1];
+      const tage = tageSeit(e.aktualisiert_am);
+      const zeit = tage === 0 ? 'heute' : tage === 1 ? 'vor 1 Tag' : `vor ${tage} Tagen`;
+      text += `  - ${name} [Wichtigkeit ${effektiveWichtigkeit(e)}%, Emotion ${e.emotion||'neutral'}, ${e.haeufigkeit||1}x erwähnt, zuletzt ${zeit}]`;
+      if(e.fakten && e.fakten.length) text += `: ${e.fakten.join('; ')}`;
+      if(e.typ === 'muster' && e.ausloeser) text += ` (Auslöser: ${e.ausloeser})`;
+      text += '\n';
+    }
+  }
+
+  // Auffälligkeiten: einst wichtige, seit langem nicht mehr erwähnte Themen (außer "nie"-Verfall)
+  const auffaellig = blaetter
+    .filter(k => k.wichtigkeit >= 60 && k.verfall !== 'nie' && tageSeit(k.aktualisiert_am) >= 30)
+    .sort((a,b) => tageSeit(b.aktualisiert_am) - tageSeit(a.aktualisiert_am))
+    .slice(0, 3);
+  if(auffaellig.length){
+    text += `\nAuffällig – lange nicht mehr erwähnt, obwohl es mal wichtig war:\n`;
+    for(const a of auffaellig){
+      text += `  - ${a.pfad[a.pfad.length-1]} (seit ${tageSeit(a.aktualisiert_am)} Tagen nicht erwähnt, war ${a.wichtigkeit}% wichtig)\n`;
+    }
+  }
+  return text;
+}
+
+function baueStimmungsText(stimmungen, knoten){
+  if(!stimmungen || !stimmungen.length) return '';
+  const finde = (pfad) => (knoten||[]).find(k => pfadKey(k.pfad) === pfadKey(pfad));
+  const letzte = stimmungen.slice(-3);
+  let text = 'Zuletzt erfasste Stimmungen (zur Einordnung, nicht wörtlich zitieren):\n';
+  for(const s of letzte){
+    const tage = tageSeit(s.erstellt_am);
+    const ursachen = (s.ursachen_pfade||[]).map(p => { const k = finde(p); return k ? k.pfad[k.pfad.length-1] : (p||[]).join(' > '); }).join(', ');
+    text += `  - vor ${tage} Tag(en) (${s.einschaetzung}): "${s.text}"${ursachen ? ' – mögliche Ursachen: '+ursachen : ''}\n`;
+  }
+  return text;
+}
+
+// ---------- Fiktiver Testdatensatz ----------
+function vorTagen(t){ const d = new Date(); d.setDate(d.getDate()-t); return d.toISOString(); }
+
+async function erzeugeKnotenDirekt(e){
+  await stelleVorfahrenSicher(e.pfad);
+  const bereitsVorhanden = await holeKnotenNachPfad(e.pfad);
+  if(bereitsVorhanden) return; // nicht doppelt anlegen, falls schon vorhanden
+  const aktualisiert_am = vorTagen(e.tage||0);
+  const erstellt_am = vorTagen((e.tage||0) + Math.floor(Math.random()*40) + 5);
+  await dbHinzufuegen('knoten', {
+    pfad: e.pfad, pfad_key: pfadKey(e.pfad), typ: e.typ||'thema',
+    wichtigkeit: e.wichtigkeit, emotion: e.emotion, verfall: e.verfall||'normal',
+    haeufigkeit: e.haeufigkeit||1, fakten: e.fakten||[],
+    ausloeser: e.ausloeser||'', entwicklung: e.entwicklung||'',
+    erstellt_am, aktualisiert_am
+  });
+}
+
+// Klar erkennbare FIKTIVE Testperson (nicht Jonas!) – deckt alle Kategorien, verschiedene
+// Wichtigkeits-/Emotions-/Verfallsstufen und unterschiedlich alte Zeitstempel ab, damit man
+// den Verfall-Effekt direkt sehen kann (z.B. "Urlaub 2017" ist fast verblasst).
+async function erzeugeFiktivenDatensatz(){
+  const eintraege = [
+    // Familie
+    {pfad:['Familie','Sohn Ben'], typ:'person', wichtigkeit:88, emotion:'gemischt', verfall:'nie', haeufigkeit:34, tage:2,
+      fakten:['macht eine Ausbildung zum Elektriker','manchmal angespannte Gespräche, wenn es um Geld geht','hört gern Metal']},
+    {pfad:['Familie','Tochter Mira'], typ:'person', wichtigkeit:92, emotion:'positiv', verfall:'nie', haeufigkeit:41, tage:5,
+      fakten:['wohnt seit einem Jahr in Leipzig','studiert Biologie','meldet sich fast jeden Sonntag']},
+    {pfad:['Familie','Bruder Kai'], typ:'person', wichtigkeit:55, emotion:'neutral', verfall:'langsam', haeufigkeit:9, tage:60,
+      fakten:['lebt in Kanada','Kontakt eher selten, meist zu Weihnachten']},
+    {pfad:['Familie','Vater gestorben'], typ:'ereignis', wichtigkeit:100, emotion:'negativ', verfall:'nie', haeufigkeit:6, tage:120,
+      fakten:['2019 verstorben','wird manchmal in stillen Momenten vermisst']},
+    // Beruf
+    {pfad:['Beruf','Grafikdesign'], typ:'thema', wichtigkeit:75, emotion:'positiv', verfall:'normal', haeufigkeit:28, tage:4,
+      fakten:['selbständig seit 6 Jahren','arbeitet meist für kleinere Agenturen']},
+    {pfad:['Beruf','Neues Studio'], typ:'ziel', wichtigkeit:80, emotion:'positiv', verfall:'normal', haeufigkeit:7, tage:14,
+      fakten:['Plan, sich mit zwei Kollegen ein Studio zu teilen']},
+    // Hobbys
+    {pfad:['Hobbys','Klettern'], typ:'thema', wichtigkeit:95, emotion:'positiv', verfall:'normal', haeufigkeit:47, tage:3,
+      fakten:['geht seit Jahren regelmäßig in die Kletterhalle','Traum: irgendwann den Similaun besteigen']},
+    {pfad:['Hobbys','Kochen'], typ:'thema', wichtigkeit:40, emotion:'positiv', verfall:'normal', haeufigkeit:12, tage:20,
+      fakten:['kocht gern aufwendig am Wochenende']},
+    {pfad:['Hobbys','Urlaub 2017'], typ:'ereignis', wichtigkeit:80, emotion:'positiv', verfall:'schnell', haeufigkeit:2, tage:500,
+      fakten:['Rundreise durch Portugal, war damals sehr wichtig']},
+    // Gesundheit
+    {pfad:['Gesundheit','Rückenschmerzen'], typ:'thema', wichtigkeit:60, emotion:'negativ', verfall:'normal', haeufigkeit:15, tage:6,
+      fakten:['seit dem Umzug öfter, vor allem morgens']},
+    {pfad:['Gesundheit','Schläft wenig'], typ:'thema', wichtigkeit:50, emotion:'negativ', verfall:'normal', haeufigkeit:10, tage:2,
+      fakten:['meist unter 6 Stunden, besonders vor Deadlines']},
+    // Persönlichkeit
+    {pfad:['Persönlichkeit','Direkt im Ton'], typ:'eigenschaft', wichtigkeit:70, emotion:'neutral', verfall:'langsam', haeufigkeit:18, tage:10,
+      fakten:['sagt lieber klar, was Sache ist, statt um den Brei zu reden']},
+    {pfad:['Persönlichkeit','Mag keinen Small Talk'], typ:'eigenschaft', wichtigkeit:65, emotion:'neutral', verfall:'langsam', haeufigkeit:14, tage:9,
+      fakten:['wird schnell ungeduldig bei oberflächlichen Gesprächen']},
+    // Vorlieben
+    {pfad:['Vorlieben','Direkte Ansprache'], typ:'praeferenz', wichtigkeit:60, emotion:'neutral', verfall:'langsam', haeufigkeit:8, tage:12,
+      fakten:['mag es, wenn ehrlich nachgefragt wird, statt nur zuzustimmen']},
+    // Grenzen
+    {pfad:['Grenzen','Thema Scheidung'], typ:'grenze', wichtigkeit:98, emotion:'negativ', verfall:'nie', haeufigkeit:3, tage:45,
+      fakten:['Scheidung vor 2 Jahren, Thema nur ansprechen, wenn er selbst beginnt']},
+    // Ziele
+    {pfad:['Ziele','Weniger arbeiten'], typ:'ziel', wichtigkeit:72, emotion:'neutral', verfall:'normal', haeufigkeit:11, tage:8,
+      fakten:['möchte auf eine 4-Tage-Woche umstellen']},
+    // Träume
+    {pfad:['Träume','Nordamerika-Roadtrip'], typ:'traum', wichtigkeit:66, emotion:'positiv', verfall:'langsam', haeufigkeit:5, tage:70,
+      fakten:['möchte irgendwann für 3 Monate mit dem Wohnmobil durch die USA']},
+    // Ängste
+    {pfad:['Ängste','Kontrollverlust im Job'], typ:'angst', wichtigkeit:58, emotion:'negativ', verfall:'normal', haeufigkeit:6, tage:15,
+      fakten:['Sorge, bei zu wenig Aufträgen die Miete fürs Studio nicht zahlen zu können']},
+    // Muster
+    {pfad:['Muster','Drei Tage ohne Klettern'], typ:'muster', wichtigkeit:70, emotion:'negativ', verfall:'nie', haeufigkeit:4, tage:5,
+      ausloeser:'mehrere Tage ohne Sport/Klettern', entwicklung:'seit ca. einem Jahr beobachtet',
+      fakten:['wird nach ein paar Tagen ohne Klettern merklich gereizter']}
+  ];
+  for(const e of eintraege){ await erzeugeKnotenDirekt(e); }
+
+  await dbHinzufuegen('stimmungen', {
+    text:'Ziemlich schlecht drauf heute, wenig Geduld.', einschaetzung:'negativ',
+    ursachen_pfade:[['Gesundheit','Schläft wenig'],['Familie','Sohn Ben']], erstellt_am: vorTagen(2)
+  });
+  await dbHinzufuegen('stimmungen', {
+    text:'Guter Tag, viel geschafft im Studio.', einschaetzung:'positiv',
+    ursachen_pfade:[['Beruf','Neues Studio']], erstellt_am: vorTagen(8)
+  });
+}
+
+async function pruefeErstlauf(){
+  const eintrag = await dbHolenMeta('seed_status');
+  if(!eintrag){
+    const vorhandeneKnoten = await dbAlle('knoten');
+    if(!vorhandeneKnoten.length){
+      await erzeugeFiktivenDatensatz();
+      await dbSetzen('meta', {key:'seed_status', wert:'fiktiv'});
+    }
+  }
+}
+
+// ---------- Lebensmodell-Ansicht (Test-/Debug-View) ----------
+function baueLebensmodellDOM(knoten, stimmungen){
+  const frag = document.createDocumentFragment();
+  const blaetter = (knoten||[]).filter(k => k.typ !== 'ordner' && k.wichtigkeit != null);
+
+  if(!blaetter.length){
+    const p = document.createElement('div');
+    p.textContent = 'Noch leer – hier baut sich nach und nach dein Lebensmodell auf.';
+    frag.appendChild(p);
+    return frag;
+  }
+
+  const nachKategorie = {};
+  for(const k of blaetter){ (nachKategorie[k.pfad[0]] = nachKategorie[k.pfad[0]]||[]).push(k); }
+
+  for(const kategorie of Object.keys(nachKategorie).sort()){
+    const h = document.createElement('div');
+    h.className = 'lm-kategorie';
+    h.textContent = kategorie;
+    frag.appendChild(h);
+
+    const eintraege = nachKategorie[kategorie].sort((a,b) => effektiveWichtigkeit(b) - effektiveWichtigkeit(a));
+    for(const e of eintraege){
+      const box = document.createElement('div');
+      box.className = 'lm-knoten';
+
+      const titel = document.createElement('div');
+      titel.className = 'lm-titel';
+      titel.textContent = e.pfad[e.pfad.length-1];
+      box.appendChild(titel);
+
+      const meta = document.createElement('div');
+      meta.className = 'lm-meta';
+      meta.textContent = `Wichtigkeit ${effektiveWichtigkeit(e)}% (Basis ${e.wichtigkeit}%) · ${e.emotion||'neutral'} · ${e.haeufigkeit||1}x erwähnt · zuletzt vor ${tageSeit(e.aktualisiert_am)} Tag(en) · Verfall: ${e.verfall||'normal'}`;
+      box.appendChild(meta);
+
+      if(e.fakten && e.fakten.length){
+        const ul = document.createElement('ul');
+        for(const f of e.fakten){
+          const li = document.createElement('li');
+          li.textContent = f;
+          ul.appendChild(li);
+        }
+        box.appendChild(ul);
+      }
+
+      if(e.typ === 'muster' && (e.ausloeser || e.entwicklung)){
+        const zusatz = document.createElement('div');
+        zusatz.className = 'lm-zusatz';
+        zusatz.textContent = [
+          e.ausloeser ? ('Auslöser: ' + e.ausloeser) : null,
+          e.entwicklung ? ('Entwicklung: ' + e.entwicklung) : null
+        ].filter(Boolean).join(' · ');
+        box.appendChild(zusatz);
+      }
+
+      frag.appendChild(box);
+    }
+  }
+
+  if(stimmungen && stimmungen.length){
+    const h = document.createElement('div');
+    h.className = 'lm-kategorie';
+    h.textContent = 'Zuletzt erfasste Stimmungen';
+    frag.appendChild(h);
+    for(const s of stimmungen.slice(-5).reverse()){
+      const box = document.createElement('div');
+      box.className = 'lm-stimmung';
+      box.textContent = `vor ${tageSeit(s.erstellt_am)} Tag(en) (${s.einschaetzung}): ${s.text}`;
+      frag.appendChild(box);
+    }
+  }
+
+  return frag;
+}
+
+$('lebensmodellBtn').onclick = async () => {
+  aktuellesGedaechtnis = await ladeGedaechtnis();
+  const inhalt = $('lebensmodellInhalt');
+  inhalt.innerHTML = '';
+  inhalt.appendChild(baueLebensmodellDOM(aktuellesGedaechtnis.knoten, aktuellesGedaechtnis.stimmungen));
+  $('setup').style.display = 'none';
+  $('lebensmodellAnsicht').style.display = 'block';
+};
+$('lebensmodellSchliessenBtn').onclick = () => {
+  $('lebensmodellAnsicht').style.display = 'none';
+  $('setup').style.display = 'block';
+};
+
+// ---------- Testdaten laden / Gehirn löschen ----------
+$('testdatenBtn').onclick = async () => {
+  if(!confirm('Aktuelles lokales Lebensmodell durch den fiktiven Testdatensatz ersetzen?')) return;
+  await dbLoeschenAlles('knoten');
+  await dbLoeschenAlles('stimmungen');
+  await erzeugeFiktivenDatensatz();
+  await dbSetzen('meta', {key:'seed_status', wert:'fiktiv'});
+  aktuellesGedaechtnis = await ladeGedaechtnis();
+  pruefeErinnerung(aktuellesGedaechtnis);
+  alert('Fiktiver Testdatensatz geladen.');
+};
+
+$('gehirnLoeschenBtn').onclick = async () => {
+  const sicher = confirm('Wirklich ALLES löschen? Das komplette lokale Lebensmodell und Gesprächsarchiv auf diesem Gerät werden unwiderruflich entfernt. Termine/Erinnerungen in der Cloud bleiben erhalten.');
+  if(!sicher) return;
+  await dbLoeschenAlles('knoten');
+  await dbLoeschenAlles('nachrichten');
+  await dbLoeschenAlles('stimmungen');
+  await dbSetzen('meta', {key:'seed_status', wert:'leer'});
+  verlauf = [];
+  $('thread').innerHTML = '<div class="empty">Frisch gestartet. Schreib mir, was los ist.</div>';
+  aktuellesGedaechtnis = await ladeGedaechtnis();
+  alert('Erledigt. Das Gedächtnis ist jetzt leer und bereit für deine echten Daten.');
+};
+
+// ---------- Gedächtnis laden: Termine/Erinnerungen aus Supabase, Rest aus IndexedDB ----------
 async function ladeGedaechtnis(){
-  const [fokus, grenzen, praef, ereignisse, personen, zeitErinnerungen, muster] = await Promise.all([
-    sb('halt_fokus_themen?status=eq.aktiv&order=intensitaet.desc&limit=5'),
-    sb('halt_grenzen?aktiv=eq.true'),
-    sb('halt_praeferenzen?order=konfidenz.desc&limit=10'),
+  const [ereignisse, zeitErinnerungen] = await Promise.all([
     sb(`halt_ereignisse?erledigt=eq.false&datum=lte.${naechsteWoche()}&order=datum.asc`),
-    sb('halt_personen?order=created_at.desc&limit=30'),
-    sb('halt_zeit_erinnerungen?erledigt=eq.false&order=faellig_um.asc'),
-    sb('halt_muster?order=letzte_erwaehnung.desc&limit=10')
+    sb('halt_zeit_erinnerungen?erledigt=eq.false&order=faellig_um.asc')
   ]);
+  const knoten = await dbAlle('knoten');
+  const stimmungen = (await dbAlle('stimmungen')).sort((a,b)=> new Date(a.erstellt_am) - new Date(b.erstellt_am));
   return {
-    fokus: fokus || [], grenzen: grenzen || [],
-    praef: praef || [], ereignisse: ereignisse || [],
-    personen: personen || [], zeitErinnerungen: zeitErinnerungen || [],
-    muster: muster || []
+    ereignisse: ereignisse || [],
+    zeitErinnerungen: zeitErinnerungen || [],
+    knoten: knoten || [],
+    stimmungen: stimmungen || []
   };
 }
 function naechsteWoche(){
@@ -405,63 +919,50 @@ function naechsteWoche(){
   return d.toISOString().slice(0,10);
 }
 
-// Rohes Archiv aller bisherigen Nachrichten laden, damit auch Dinge auffindbar
-// sind, die die Extraktion (noch) nicht sauber in eine Tabelle gepackt hat.
+// Rohes Archiv aller bisherigen Nachrichten laden (jetzt lokal), damit auch Dinge auffindbar
+// sind, die die Extraktion (noch) nicht sauber ins Lebensmodell übernommen hat.
 async function ladeArchiv(limit=200){
-  const rows = await sb(`halt_nachrichten?order=created_at.asc&limit=${limit}`);
-  return rows || [];
+  const alle = await dbAlle('nachrichten');
+  alle.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  return alle.slice(-limit);
 }
 
 function baueSystemPrompt(mem){
   let p = `Du bist "Ich" – ein enger, ehrlicher Freund und Lebensberater für Jonas. `+
-    `Du hast ein echtes, dauerhaftes Gedächtnis: nach jedem Austausch analysiert ein Hintergrundprozess das Gespräch `+
-    `und speichert relevante Fakten automatisch in einer Datenbank (Supabase) – Personen, Fokusthemen, Grenzen, Präferenzen, Termine. `+
-    `Beim nächsten Gespräch werden diese Fakten wieder geladen und dir hier unten mitgegeben. Du erinnerst dich also wirklich, `+
-    `nur eben nicht wie ein Mensch "im Kopf", sondern über diese Datenbank. Wenn Jonas fragt, ob du dir was gemerkt hast: `+
-    `antworte ehrlich und ruhig mit ja, das läuft automatisch im Hintergrund, du musst nicht technisch ins Detail gehen, `+
-    `außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
+    `Du hast ein echtes, dauerhaftes Gedächtnis: es lebt direkt auf diesem Gerät (lokal im Browser gespeichert, nicht in der Cloud) `+
+    `und wird nach jedem Austausch von einem Hintergrundprozess aktualisiert – nicht als Liste einzelner Notizen, sondern als `+
+    `zusammenhängendes Lebensmodell: Themen und Personen mit Wichtigkeit, Emotion, Häufigkeit und Zeitpunkt der letzten Erwähnung. `+
+    `Ältere, unwichtige Dinge verblassen von selbst, einschneidende Dinge (z.B. Todesfälle, Geburten) bleiben immer wichtig. `+
+    `Termine und kurzfristige Erinnerungen laufen weiterhin separat über die Cloud, damit Push-Benachrichtigungen geräteübergreifend funktionieren. `+
+    `Wenn Jonas fragt, ob du dir was gemerkt hast: antworte ehrlich und ruhig mit ja – nur eben nicht "im Kopf", sondern lokal auf seinem Gerät. `+
+    `Du musst nicht technisch ins Detail gehen, außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
     `Wenn Jonas dich explizit bittet, dir etwas zu merken, nimm das besonders ernst und wiederhole es kurz zur Bestätigung. `+
     `Wenn er dich bittet, ihn an etwas zu erinnern, aber kein Datum nennt, frag kurz nach dem Datum – ohne Datum kann kein Termin gesetzt werden. `+
-    `Du kannst auch uhrzeitgenaue Kurzzeit-Erinnerungen setzen ("in 10 Minuten", "um 17 Uhr") – das läuft automatisch im Hintergrund über einen Extraktionsprozess, `+
-    `du musst dafür nichts Technisches tun. Wenn Jonas sowas wie "erinnere mich in X Minuten an Y" sagt, bestätige das einfach knapp und zuversichtlich `+
-    `(z.B. "Mach ich, in 10 Minuten meld ich mich wegen den Blumen") – behaupte NIEMALS, du könntest das nicht oder bräuchtest, dass er sich später nochmal meldet. `+
-    `Wenn du etwas gefragt wirst und es weder in den Fakten unten noch im Gesprächsarchiv steht, sag ehrlich, dass du es nicht hast – erfinde nichts. `+
-    `Du hast außerdem Zugriff auf ein Werkzeug für aktuelles Wetter (wetter_abfragen) – nutze es, wenn Jonas nach dem `+
-    `Wetter, einer Vorhersage oder Bedingungen für eine Aktivität (Radtour, Wanderung etc.) an einem Ort fragt, `+
-    `statt zu sagen du hättest keinen Internetzugang. `+
-    `Du bist warm, aber nicht aufgesetzt fröhlich. Du machst keine platten Aufmunterungsversuche. Du fragst nach, wenn es passt, `+
-    `aber drängst nicht. Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
+    `Du kannst auch uhrzeitgenaue Kurzzeit-Erinnerungen setzen ("in 10 Minuten", "um 17 Uhr") – das läuft automatisch im Hintergrund, `+
+    `du musst dafür nichts Technisches tun. Bestätige das einfach knapp und zuversichtlich (z.B. "Mach ich, in 10 Minuten meld ich mich wegen den Blumen") – `+
+    `behaupte NIEMALS, du könntest das nicht oder bräuchtest, dass er sich später nochmal meldet. `+
+    `Wenn du etwas gefragt wirst und es weder im Lebensmodell unten noch im Gesprächsarchiv steht, sag ehrlich, dass du es nicht hast – erfinde nichts. `+
+    `Du hast außerdem Zugriff auf zwei Werkzeuge: wetter_abfragen (aktuelles Wetter/Vorhersage für einen Ort) und archiv_durchsuchen `+
+    `(durchsucht das komplette bisherige Gesprächsarchiv nach einem Begriff, falls du einen genauen alten Wortlaut oder ein Detail brauchst, `+
+    `das nicht im Lebensmodell unten steht). Nutze archiv_durchsuchen sparsam – arbeite im Normalfall mit dem verdichteten Lebensmodell unten, `+
+    `nicht mit dem kompletten Roharchiv. `+
+    `Sei nicht nur reaktiv: wenn im Lebensmodell etwas auffällt (ein Thema, das lange nicht mehr erwähnt wurde, obwohl es wichtig war; ein Muster; `+
+    `ein möglicher Zusammenhang zwischen Stimmung und Ereignissen), sprich es an passender Stelle von dir aus an – als vorsichtige Frage, nicht als `+
+    `Analyse, Diagnose oder Statistik. Dräng dich nicht auf. `+
+    `Du bist warm, aber nicht aufgesetzt fröhlich, machst keine platten Aufmunterungsversuche, fragst nach, wenn es passt, aber drängst nicht. `+
+    `Antworte auf Deutsch, kurz und persönlich, nicht wie ein Assistent.\n\n`;
 
-  if(mem.personen.length){
-    p += `Personen in seinem Leben: `+
-      mem.personen.map(pe=>`${pe.name}${pe.beziehung ? ' ('+pe.beziehung+')' : ''}${pe.notizen ? ' – '+pe.notizen : ''}`).join('; ') + '.\n';
-  }
-  if(mem.fokus.length){
-    p += `Was Jonas gerade beschäftigt: ${mem.fokus.map(f=>f.thema).join(', ')}.\n`;
-  }
-  if(mem.grenzen.length){
-    p += `Grenzen, die du respektierst (nicht erwähnen, dass du das weißt, einfach beachten): `+
-      mem.grenzen.map(g=>`${g.thema} – ${g.beobachtung}`).join('; ') + '.\n';
-  }
-  if(mem.praef.length){
-    p += `Bekannte Vorlieben im Umgang: ${mem.praef.map(p=>p.aussage).join('; ')}.\n`;
-  }
+  p += `--- Lebensmodell ---\n` + baueLebensmodellText(mem.knoten);
+
+  const stimmungsText = baueStimmungsText(mem.stimmungen, mem.knoten);
+  if(stimmungsText) p += `\n${stimmungsText}`;
+
   if(mem.ereignisse.length){
-    p += `Anstehende Termine: ${mem.ereignisse.map(e=>`${e.titel} am ${e.datum}`).join('; ')}.\n`;
+    p += `\nAnstehende Termine: ${mem.ereignisse.map(e=>`${e.titel} am ${e.datum}`).join('; ')}.\n`;
   }
   if(mem.zeitErinnerungen && mem.zeitErinnerungen.length){
     p += `Bereits gesetzte, noch nicht fällige Kurzzeit-Erinnerungen: `+
       mem.zeitErinnerungen.map(z=>`${z.text} um ${new Date(z.faellig_um).toLocaleString('de-DE')}`).join('; ') + '.\n';
-  }
-  if(mem.muster && mem.muster.length){
-    p += `Wiederkehrende Verhaltensmuster, die Jonas selbst als solche erkennen lassen hat: `+
-      mem.muster.map(m=>`${m.thema}${m.beobachtung ? ' – '+m.beobachtung : ''}`).join('; ') + `. `+
-      `Geh damit vorsichtig um: nicht diagnostizieren, nicht belehren, keine Statistiken oder Ratschläge aufdrängen. `+
-      `Nur ansprechen, wenn es gerade zum Gespräch passt, sonst einfach im Hinterkopf behalten.\n`;
-  }
-  if(!mem.fokus.length && !mem.grenzen.length && !mem.praef.length && !mem.ereignisse.length && !mem.personen.length){
-    p += `Die Datenbank ist noch leer – ihr steht am Anfang. Sag das ruhig so: du baust dein Bild von ihm gerade erst auf, `+
-      `nicht dass du generell kein Gedächtnis hättest.\n`;
   }
   return p;
 }
@@ -499,20 +1000,12 @@ function baueLeichtenSystemPrompt(modus){
       `keine langen Antworten. Du hast Zugriff auf ein Wetter-Werkzeug (wetter_abfragen), falls relevant. Antworte auf Deutsch.`;
   }
   return `Du bist "Ich", ein hilfsbereiter, warmer Begleiter für Jonas – gerade im allgemeinen Modus, also ohne Zugriff `+
-    `auf sein persönliches Gedächtnis (keine Namen, Vorlieben oder alten Themen). Beantworte die Frage normal und hilfreich. `+
+    `auf sein persönliches Lebensmodell (keine Namen, Vorlieben oder alten Themen). Beantworte die Frage normal und hilfreich. `+
     `Du hast Zugriff auf ein Wetter-Werkzeug (wetter_abfragen), falls relevant. Antworte auf Deutsch.`;
 }
 
 function istWetterFrage(text){
   return /wetter|regen|sonne|sonnig|grad|vorhersage|schnee|sturm|\bwind\b|niederschlag|temperatur/i.test(text);
-}
-
-function filterePersonenFuerNachricht(text, personen){
-  if(!personen || !personen.length) return [];
-  const t = text.toLowerCase();
-  return personen.filter(p =>
-    t.includes(p.name.toLowerCase()) || (p.beziehung && t.includes(p.beziehung.toLowerCase()))
-  );
 }
 
 function wirktPersoenlich(text){
@@ -529,7 +1022,7 @@ async function sendeNachricht(text){
 
   renderNachricht('user', text);
   verlauf.push({role:'user', content:text});
-  sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'user', content:text}), prefer:'return=minimal'});
+  dbHinzufuegen('nachrichten', {role:'user', content:text, created_at: new Date().toISOString()}).catch(console.error);
   $('textInput').value = '';
   $('textInput').style.height = 'auto';
 
@@ -542,12 +1035,12 @@ async function sendeNachricht(text){
   }
 
   // Auch außerhalb des Persönlich-Modus: wenn die Frage eindeutig persönlich klingt,
-  // für diese eine Nachricht automatisch das Gedächtnis mit dazuholen.
+  // für diese eine Nachricht automatisch das Lebensmodell mit dazuholen.
   const persoenlicherFallback = aktuellerModus !== 'persoenlich' && wirktPersoenlich(text);
   if(persoenlicherFallback){
     const hinweis = document.createElement('div');
     hinweis.className = 'system-hinweis';
-    hinweis.textContent = '🧠 Klingt persönlich – kurz mit deinem Gedächtnis abgeglichen';
+    hinweis.textContent = '🧠 Klingt persönlich – kurz mit deinem Lebensmodell abgeglichen';
     $('thread').appendChild(hinweis);
   }
 
@@ -555,13 +1048,12 @@ async function sendeNachricht(text){
 
   let systemPrompt;
   if(aktuellerModus === 'persoenlich' || persoenlicherFallback){
-    const schlankesGedaechtnis = { ...aktuellesGedaechtnis, personen: filterePersonenFuerNachricht(text, aktuellesGedaechtnis.personen) };
-    systemPrompt = baueSystemPrompt(schlankesGedaechtnis);
+    systemPrompt = baueSystemPrompt(aktuellesGedaechtnis);
   }else{
     systemPrompt = baueLeichtenSystemPrompt(aktuellerModus);
   }
 
-  // Im leichten Modus nur die aktuelle Nachricht schicken, nicht den ganzen Verlauf mit Gedächtnis-Bezug
+  // Im leichten Modus nur die aktuelle Nachricht schicken, nicht den ganzen Verlauf mit Lebensmodell-Bezug
   const nachrichtenFuerAnfrage = (aktuellerModus === 'persoenlich' || persoenlicherFallback) ? verlauf : [{role:'user', content:text}];
 
   try{
@@ -569,7 +1061,7 @@ async function sendeNachricht(text){
     pendingEl.textContent = antwort || '...';
     pendingEl.classList.remove('pending');
     verlauf.push({role:'assistant', content:antwort});
-    sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'assistant', content:antwort}), prefer:'return=minimal'});
+    dbHinzufuegen('nachrichten', {role:'assistant', content:antwort, created_at: new Date().toISOString()}).catch(console.error);
     if('speechSynthesis' in window && vorlesenAktiv) vorlesen(antwort);
 
     if(aktuellerModus === 'persoenlich' || persoenlicherFallback){
@@ -577,7 +1069,7 @@ async function sendeNachricht(text){
     }else if(aktuellerModus === 'erinnerung'){
       verarbeiteErinnerungLeicht(text);
     }
-    // 'allgemein': keine Extraktion, nichts wird ins Gedächtnis geschrieben
+    // 'allgemein': keine Extraktion, nichts wird ins Lebensmodell geschrieben
   }catch(e){
     pendingEl.textContent = 'Fehler: ' + (e.message || e);
     pendingEl.classList.remove('pending');
@@ -599,50 +1091,47 @@ function extrahiereGgfs(text){
   }
 }
 
-// ---------- Extraktion: Fakten in DB schreiben ----------
+// ---------- Extraktion: Lebensmodell (Graph) aktualisieren ----------
 async function extrahiereGedaechtnis(){
   // Nicht nur den letzten Austausch sehen, sondern die letzten ~8 Nachrichten als Kontext,
   // damit Bezüge wie "mein Bruder" aufgelöst werden können, wenn der Name kurz vorher fiel.
   const kontext = verlauf.slice(-8).map(m => `${m.role === 'user' ? 'Jonas' : 'Ich'}: ${m.content}`).join('\n');
-  await verarbeiteAusschnitt(kontext, true);
+  await verarbeiteAusschnitt(kontext);
 }
 
-function baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen, bekannteMuster){
+function baueExtraktionsPrompt(transkript, bekannteKnotenText, bekannteErinnerungenText, bekannteMusterText){
   const jetzt = new Date();
   const offsetMin = -jetzt.getTimezoneOffset();
   const offsetStr = (offsetMin >= 0 ? '+' : '-') + Math.abs(offsetMin/60).toString().padStart(2,'0') + ':00';
   const lokalStr = jetzt.toLocaleString('de-DE', { hour12:false, dateStyle:'medium', timeStyle:'medium' });
 
   return `Hier ist ein Ausschnitt eines Gesprächs zwischen Jonas und seinem persönlichen Begleiter. `+
-    `Analysiere ihn und antworte NUR mit JSON, keine Erklärung, kein Markdown:
+  `Baue daraus KEINE einzelnen Notizen, sondern aktualisiere ein hierarchisches Lebensmodell (ein Wissensnetz über Jonas). `+
+  `Antworte NUR mit JSON, keine Erklärung, kein Markdown:
 {
-  "neue_personen": [{"name": "...", "beziehung": "...", "notizen": "..."}],
-  "neue_fokus_themen": [{"thema": "..."}],
-  "neue_grenzen": [{"thema": "...", "beobachtung": "..."}],
-  "neue_praeferenzen": [{"kategorie": "...", "aussage": "..."}],
-  "neue_ereignisse": [{"titel": "...", "datum": "YYYY-MM-DD", "typ": "...", "notizen": "...", "erinnere_vorher": true, "erinnere_am_tag": true}],
-  "neue_zeit_erinnerungen": [{"text": "...", "faellig_um": "YYYY-MM-DDTHH:MM:SSZ"}],
-  "neue_muster": [{"thema": "...", "beobachtung": "...", "ausloeser": "...", "entwicklung": "..."}]
+  "aktualisierungen": [
+    {"pfad": ["Kategorie", "Unterknoten"], "typ": "person|thema|ereignis|ziel|traum|angst|eigenschaft|praeferenz|grenze", "neue_fakten": ["..."], "wichtigkeit": 0, "emotion": "positiv|negativ|neutral|gemischt", "verfall": "nie|langsam|normal|schnell"}
+  ],
+  "neue_muster": [{"thema": "...", "beobachtung": "...", "ausloeser": "...", "entwicklung": "..."}],
+  "stimmung": {"text": "...", "einschaetzung": "positiv|negativ|neutral", "vermutete_ursachen_pfade": [["Kategorie","Unterknoten"]]}
 }
+
+Erlaubte Kategorien (erstes Element von "pfad"): Familie, Beruf, Hobbys, Gesundheit, Persönlichkeit, Vorlieben, Grenzen, Ziele, Träume, Ängste, Sonstiges.
+"pfad" führt von der Kategorie zum konkreten Knoten, z.B. ["Familie","Sohn Tim"] oder ["Hobbys","Bergsteigen"]. Für Personen ohne klare Familienrolle: ["Sonstiges","Name"].
 
 Aktuelle Zeit, LOKAL bei Jonas: ${lokalStr} (Zeitzonen-Versatz UTC${offsetStr})
 Aktuelle Zeit als UTC-Zeitstempel: ${jetzt.toISOString()}
 
 Wichtige Regeln:
-- Die neueste Nachricht (ganz am Ende des Ausschnitts) ist die Hauptquelle für alles Neue. Ältere Nachrichten im Ausschnitt dienen NUR dazu, Bezüge aufzulösen (Namen, Zusammenhänge) – sie sind KEINE eigene Quelle für neue Erinnerungen, Termine oder Fakten, wenn sie beim letzten Durchlauf schon dagewesen sein könnten. Im Zweifel: lieber nichts extrahieren als etwas doppelt oder frei erfinden.
-- Nutze den GESAMTEN Ausschnitt als Kontext, um Bezüge aufzulösen (z.B. wenn "mein Bruder" gemeint ist, aber der Name "Ben" ein paar Zeilen vorher fiel – dann trag den echten Namen ein, nicht "Bruder").
-- neue_ereignisse für Termine mit einem DATUM ohne feste Uhrzeit (Beerdigung, Deadline) – erinnert einen Tag vorher und am Tag selbst.
-- neue_zeit_erinnerungen für kurzfristige, uhrzeitgenaue Erinnerungen ("in 10 Minuten", "um 17 Uhr", "gleich", "heute Abend um 8"). Jonas nennt IMMER seine LOKALE Zeit. Rechne faellig_um IMMER als vollständigen UTC-Zeitstempel mit "Z" am Ende zurück (z.B. "2026-07-30T15:00:00Z") – rechne dafür von der lokalen Zeit oben mit dem angegebenen Zeitzonen-Versatz in UTC um. Wenn eine Uhrzeit ohne Datum genannt wird und heute schon vorbei ist, nimm morgen.
-- SEHR WICHTIG bei neue_zeit_erinnerungen: Extrahiere eine Zeit-Erinnerung NUR, wenn die Bitte darum in der ALLERLETZTEN Nachricht im Ausschnitt steht (der letzten Zeile ganz unten). Wenn eine Zeit-Erinnerung nur in einer ÄLTEREN Nachricht weiter oben im Ausschnitt vorkam, NICHT nochmal aufnehmen, selbst wenn sie noch im Kontext sichtbar ist – die wurde beim vorherigen Durchlauf bereits erfasst. Zeit-Erinnerungen sind immer an den Moment gebunden, in dem sie ausgesprochen wurden ("in 10 Minuten" ergibt nur im Moment der Aussage Sinn) – deshalb gilt hier strenger als sonst: nur die letzte Nachricht zählt als Quelle, nicht der gesamte Kontext.
-- Zusätzlich: nur aufnehmen, wenn eine EINDEUTIGE, EXPLIZITE Bitte um eine Erinnerung mit erkennbarer Zeitangabe vorliegt (Formulierungen wie "erinnere mich an...", "erinnere mich in X Minuten an...", "merk dir für X Uhr..."). Ein einzelnes Wort, ein Test-Begriff oder ein beiläufig erwähntes Ding OHNE erkennbare Erinnerungsabsicht ist KEINE Erinnerung – nicht erfinden. Erstelle pro Nachricht nur so viele Erinnerungen, wie explizit einzeln mit eigener Zeit genannt wurden.
-- NIEMALS für Dauerzustände wie Jobs, Beziehungsstatus oder allgemeine Fakten – die gehören in neue_personen (als notizen) oder neue_praeferenzen.
-- neue_muster NUR, wenn Jonas selbst explizit signalisiert, dass etwas wiederkehrend ist (Formulierungen wie "das ist bei mir immer so", "passiert mir öfter", "seit Monaten schon", "das kommt immer wieder"). Ein einzelnes Erwähnen eines Themas, auch wenn es ernst ist, ist KEIN Muster – das gehört stattdessen in neue_fokus_themen. Sei hier sehr zurückhaltend: im Zweifel lieber nicht anlegen. Bereits bekannte Muster: ${bekannteMuster}. Bei erneuter Erwähnung eines bekannten Musters: denselben "thema"-Namen zurückgeben, damit es aktualisiert statt dupliziert wird.
-- Bereits vorhandene, noch nicht fällige Zeit-Erinnerungen: ${bekannteErinnerungen}. Lege KEINE neue_zeit_erinnerungen an, die inhaltlich einer davon entsprechen.
-- Bei neuen Terminen: erinnere_vorher (einen Tag vorher) und erinnere_am_tag (am Tag selbst) beide auf true setzen, außer Jonas sagt explizit etwas anderes.
-- Wenn kein konkretes Datum oder keine Uhrzeit genannt wird, nichts erfinden – Array leer lassen.
-- Bereits bekannte Personen: ${bekanntePersonen}. Wenn eine bekannte Person unter einem allgemeinen Bezug (z.B. "mein Bruder") erneut auftaucht, aber inzwischen der Name klar ist, gib den ECHTEN Namen zurück, nicht die Bezugsbezeichnung – damit ein evtl. bestehender Platzhalter-Eintrag korrigiert werden kann.
-- Wenn Jonas explizit sagt "merk dir das", "das ist wichtig" oder ähnliches, extrahiere den Inhalt auf jeden Fall.
-- Erfinde nichts. Lasse Arrays leer, wenn nichts Neues erkennbar ist.
+- Die neueste Nachricht (ganz am Ende des Ausschnitts) ist die Hauptquelle für alles Neue. Ältere Nachrichten im Ausschnitt dienen NUR dazu, Bezüge aufzulösen (Namen, Zusammenhänge) – sie sind KEINE eigene Quelle für neue Einträge, wenn sie beim letzten Durchlauf schon dagewesen sein könnten. Im Zweifel: lieber nichts extrahieren als etwas doppelt oder frei erfinden.
+- "wichtigkeit" ist deine Einschätzung, wie zentral dieses Thema/diese Person aktuell für Jonas ist (0-100) – nicht wie oft es erwähnt wurde, sondern wie bedeutsam es ist. Einschneidende Dinge (Tod, Geburt, Trennung, Scheidung) bekommen 90-100 und "verfall":"nie". Alltägliches/Beiläufiges bekommt niedrige Werte (5-20).
+- "verfall": wie schnell die Bedeutung von selbst nachlässt, wenn nichts Neues dazu erwähnt wird. "nie" für einschneidende, identitätsprägende Dinge; "schnell" für kurzlebige/situative Dinge (ein einzelner Ausflug, eine akute Sache); "normal" für die meisten Themen/Hobbys; "langsam" für stabile Charaktereigenschaften oder Beziehungen.
+- "neue_fakten": NUR neue, noch nicht bekannte Detail-Aussagen zu diesem Knoten (z.B. "studiert", "wohnt in Hamburg") – keine Wiederholung von Bekanntem.
+- Nutze für dieselbe Person/dasselbe Thema IMMER denselben Pfad wie bisher (exakt gleiche Schreibweise), damit aktualisiert statt dupliziert wird. Bereits bekannte Knoten (Pfad und aktuelle Wichtigkeit): ${bekannteKnotenText}.
+- "neue_muster" NUR, wenn Jonas selbst explizit signalisiert, dass etwas wiederkehrend ist (Formulierungen wie "das ist bei mir immer so", "passiert mir öfter", "seit Monaten schon", "das kommt immer wieder"). Ein einzelnes Erwähnen, auch wenn es ernst ist, ist KEIN Muster – das gehört stattdessen als normale "aktualisierung". Sei hier sehr zurückhaltend. Bereits bekannte Muster: ${bekannteMusterText}. Bei erneuter Erwähnung eines bekannten Musters denselben "thema"-Namen zurückgeben.
+- "stimmung" NUR setzen, wenn Jonas in der neuesten Nachricht erkennbar über seine aktuelle Stimmung/Verfassung schreibt (gut, schlecht, gestresst, erschöpft etc.) – sonst weglassen (null lassen bzw. Feld weglassen). "vermutete_ursachen_pfade" nur, wenn im Kontext ein plausibler Zusammenhang erkennbar ist (z.B. Streit, wenig Schlaf, viel Arbeit) – rate nicht wild, im Zweifel leer lassen.
+- Termine mit einem konkreten Datum oder uhrzeitgenaue Kurzzeit-Erinnerungen NICHT hier verarbeiten (das läuft über einen separaten Prozess) – ignoriere Formulierungen wie "erinnere mich in 10 Minuten" komplett in dieser Antwort. Bereits vorhandene, noch nicht fällige Erinnerungen (nur zur Einordnung, hier nichts draus ableiten): ${bekannteErinnerungenText}.
+- Erfinde nichts. Lasse Arrays leer bzw. "stimmung" weg, wenn nichts Eindeutiges erkennbar ist.
 
 Gesprächsausschnitt:
 ${transkript}`;
@@ -686,57 +1175,42 @@ Nachricht: ${nachricht}`;
 }
 
 async function verarbeiteAusschnitt(transkript){
-  const bekanntePersonen = (aktuellesGedaechtnis.personen||[]).map(p=>`${p.name} (${p.beziehung||'?'})`).join(', ') || 'keine bisher';
-  const bekannteErinnerungen = (aktuellesGedaechtnis.zeitErinnerungen||[]).map(z=>z.text).join(', ') || 'keine bisher';
-  const bekannteMuster = (aktuellesGedaechtnis.muster||[]).map(m=>m.thema).join(', ') || 'keine bisher';
-  const prompt = baueExtraktionsPrompt(transkript, bekanntePersonen, bekannteErinnerungen, bekannteMuster);
+  const bekannteKnotenText = (aktuellesGedaechtnis.knoten||[])
+    .filter(k => k.typ !== 'ordner' && k.wichtigkeit != null)
+    .map(k => `${k.pfad.join(' > ')} (${k.wichtigkeit}%)`).join('; ') || 'keine bisher';
+  const bekannteErinnerungenText = (aktuellesGedaechtnis.zeitErinnerungen||[]).map(z=>z.text).join(', ') || 'keine bisher';
+  const bekannteMusterText = (aktuellesGedaechtnis.knoten||[])
+    .filter(k => k.typ === 'muster').map(k => k.pfad[k.pfad.length-1]).join(', ') || 'keine bisher';
+
+  const prompt = baueExtraktionsPrompt(transkript, bekannteKnotenText, bekannteErinnerungenText, bekannteMusterText);
 
   try{
-    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 800)).replace(/```json|```/g,'').trim();
+    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 900)).replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
 
-    for(const pe of parsed.neue_personen||[]){
-      // Match entweder über exakten Namen ODER über eine bisher nur als Bezug gespeicherte
-      // Person mit derselben Beziehung und noch generischem Namen (Platzhalter-Fall).
-      const bestehend = (aktuellesGedaechtnis.personen||[]).find(x =>
-        x.name.toLowerCase() === pe.name.toLowerCase() ||
-        (pe.beziehung && x.beziehung && x.beziehung.toLowerCase() === pe.beziehung.toLowerCase()
-          && x.name.toLowerCase() === (x.beziehung||'').toLowerCase())
-      );
-      if(bestehend){
-        await sb(`halt_personen?id=eq.${bestehend.id}`, {method:'PATCH', body: JSON.stringify(pe), prefer:'return=minimal'});
-      }else{
-        await sb('halt_personen', {method:'POST', body: JSON.stringify(pe), prefer:'return=minimal'});
-      }
-    }
-    for(const f of parsed.neue_fokus_themen||[]){
-      await sb('halt_fokus_themen', {method:'POST', body: JSON.stringify(f), prefer:'return=minimal'});
-    }
-    for(const g of parsed.neue_grenzen||[]){
-      await sb('halt_grenzen', {method:'POST', body: JSON.stringify(g), prefer:'return=minimal'});
-    }
-    for(const p of parsed.neue_praeferenzen||[]){
-      await sb('halt_praeferenzen', {method:'POST', body: JSON.stringify(p), prefer:'return=minimal'});
-    }
-    for(const e of parsed.neue_ereignisse||[]){
-      await sb('halt_ereignisse', {method:'POST', body: JSON.stringify(e), prefer:'return=minimal'});
-    }
-    for(const z of parsed.neue_zeit_erinnerungen||[]){
-      await sb('halt_zeit_erinnerungen', {method:'POST', body: JSON.stringify(z), prefer:'return=minimal'});
+    for(const u of parsed.aktualisierungen||[]){
+      if(!u.pfad || !u.pfad.length) continue;
+      await upsertKnoten(u.pfad, {
+        typ: u.typ, wichtigkeit: u.wichtigkeit, emotion: u.emotion, verfall: u.verfall, neueFakten: u.neue_fakten||[]
+      });
     }
     for(const m of parsed.neue_muster||[]){
-      const bestehend = (aktuellesGedaechtnis.muster||[]).find(x => x.thema.toLowerCase() === m.thema.toLowerCase());
-      if(bestehend){
-        await sb(`halt_muster?id=eq.${bestehend.id}`, {
-          method:'PATCH', body: JSON.stringify({...m, letzte_erwaehnung: new Date().toISOString()}), prefer:'return=minimal'
-        });
-      }else{
-        await sb('halt_muster', {method:'POST', body: JSON.stringify(m), prefer:'return=minimal'});
-      }
+      if(!m.thema) continue;
+      await upsertKnoten(['Muster', m.thema], {
+        typ:'muster', wichtigkeit:70, emotion:'neutral', verfall:'nie',
+        neueFakten: m.beobachtung ? [m.beobachtung] : [], ausloeser: m.ausloeser, entwicklung: m.entwicklung
+      });
     }
-    const hatNeues = (parsed.neue_fokus_themen||[]).length || (parsed.neue_grenzen||[]).length ||
-      (parsed.neue_personen||[]).length || (parsed.neue_praeferenzen||[]).length || (parsed.neue_ereignisse||[]).length ||
-      (parsed.neue_zeit_erinnerungen||[]).length || (parsed.neue_muster||[]).length;
+    if(parsed.stimmung && parsed.stimmung.text){
+      await dbHinzufuegen('stimmungen', {
+        text: parsed.stimmung.text, einschaetzung: parsed.stimmung.einschaetzung || 'neutral',
+        ursachen_pfade: parsed.stimmung.vermutete_ursachen_pfade || [],
+        erstellt_am: new Date().toISOString()
+      });
+    }
+
+    const hatNeues = (parsed.aktualisierungen||[]).length || (parsed.neue_muster||[]).length ||
+      (parsed.stimmung && parsed.stimmung.text);
     if(hatNeues){
       aktuellesGedaechtnis = await ladeGedaechtnis();
       pruefeErinnerung(aktuellesGedaechtnis);
@@ -748,7 +1222,7 @@ async function verarbeiteAusschnitt(transkript){
   }
 }
 
-// ---------- Vollständige Nachbearbeitung: gesamtes Archiv rückwirkend durchgehen ----------
+// ---------- Vollständige Nachbearbeitung: gesamtes lokales Archiv rückwirkend durchgehen ----------
 async function vervollstaendigeGedaechtnis(){
   if(!keysComplete() || !aktuellesGedaechtnis){
     renderNachricht('assistant', 'Dafür brauche ich erst alle drei Keys gespeichert – trag sie oben ein.');
@@ -770,7 +1244,7 @@ async function vervollstaendigeGedaechtnis(){
     statusEl.textContent = `Gehe das komplette Gespräch durch (${i + 1}/${anzahlBatches})…`;
   }
 
-  statusEl.textContent = 'Fertig – ich hab das ganze bisherige Gespräch nochmal durchgesehen und ergänzt, was fehlte.';
+  statusEl.textContent = 'Fertig – ich hab das ganze bisherige Gespräch nochmal durchgesehen und das Lebensmodell ergänzt, was fehlte.';
   btn.disabled = false;
 }
 
@@ -916,6 +1390,7 @@ if('serviceWorker' in navigator){
 
 async function init(){
   if(!keysComplete()) return;
+  await pruefeErstlauf();
   aktuellesGedaechtnis = await ladeGedaechtnis();
 
   // Die letzten paar Nachrichten als Gesprächskontext, für flüssige Anschlüsse innerhalb der Sitzung
