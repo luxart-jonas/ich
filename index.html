@@ -634,6 +634,15 @@ async function dbLoeschenAlles(storeName){
   });
 }
 
+async function dbLoeschenNachId(storeName, id){
+  const store = await dbStore(storeName, 'readwrite');
+  return new Promise((resolve,reject)=>{
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
 async function dbNachIndex(storeName, indexName, wert){
   const store = await dbStore(storeName);
   return new Promise((resolve,reject)=>{
@@ -658,6 +667,17 @@ function pfadKey(pfad){ return pfad.map(s=>String(s).trim().toLowerCase()).join(
 async function holeKnotenNachPfad(pfad){
   const treffer = await dbNachIndex('knoten', 'pfad_key', pfadKey(pfad));
   return treffer[0] || null;
+}
+
+// Löscht den Knoten an genau diesem Pfad UND alle Unter-Knoten darunter (z.B. löscht
+// ['Hobbys'] auch ['Hobbys','Klettern']). Gibt die gelöschten Knoten zurück (für eine
+// Bestätigung im Chat). Kein Treffer -> einfach nichts tun, kein Fehler.
+async function loescheKnotenUnterPfad(pfad){
+  const zielKey = pfadKey(pfad);
+  const alle = await dbAlle('knoten');
+  const treffer = alle.filter(k => k.pfad_key === zielKey || k.pfad_key.startsWith(zielKey + ' > '));
+  for(const k of treffer){ await dbLoeschenNachId('knoten', k.id); }
+  return treffer;
 }
 
 async function stelleVorfahrenSicher(pfad){
@@ -1048,6 +1068,9 @@ function baueSystemPrompt(mem){
     `Wenn Jonas fragt, ob du dir was gemerkt hast: antworte ehrlich und ruhig mit ja – nur eben nicht "im Kopf", sondern lokal auf seinem Gerät. `+
     `Du musst nicht technisch ins Detail gehen, außer er fragt danach. Behaupte niemals, du hättest kein Gedächtnis oder nur diesen einen Chat – das stimmt nicht. `+
     `Wenn Jonas dich explizit bittet, dir etwas zu merken, nimm das besonders ernst und wiederhole es kurz zur Bestätigung. `+
+    `Wenn Jonas dich bittet, etwas zu löschen oder zu vergessen (z.B. "lösch das", "vergiss, dass ich...", "das musst du dir nicht merken", `+
+    `"lösch alles zum Thema X"), nimm das genauso ernst: bestätige knapp, dass du es aus deinem Gedächtnis entfernst (z.B. "Ok, hab ich gelöscht"). `+
+    `Das läuft automatisch im Hintergrund genau wie das Merken – du musst dafür nichts Technisches tun und NIEMALS behaupten, du könntest nichts löschen. `+
     `Wenn er dich bittet, ihn an etwas zu erinnern, aber kein Datum nennt, frag kurz nach dem Datum – ohne Datum kann kein Termin gesetzt werden. `+
     `Du kannst auch uhrzeitgenaue Kurzzeit-Erinnerungen setzen ("in 10 Minuten", "um 17 Uhr") – das läuft automatisch im Hintergrund, `+
     `du musst dafür nichts Technisches tun. Bestätige das einfach knapp und zuversichtlich (z.B. "Mach ich, in 10 Minuten meld ich mich wegen den Blumen") – `+
@@ -1199,7 +1222,7 @@ async function sendeNachricht(text){
 // (Termine, Uhrzeiten, "merk dir"), sonst nur gebündelt alle 3 Nachrichten.
 let nachrichtenSeitExtraktion = 0;
 function brauchtSofortigeExtraktion(text){
-  return /merk dir|wichtig|erinner|termin|geburtstag|\buhr\b|minute|stunde|morgen|heute abend|\d{1,2}[:.]\d{2}|\d{1,2}\.\d{1,2}\./i.test(text);
+  return /merk dir|wichtig|erinner|termin|geburtstag|\buhr\b|minute|stunde|morgen|heute abend|\d{1,2}[:.]\d{2}|\d{1,2}\.\d{1,2}\.|lösch|vergiss|entfern/i.test(text);
 }
 function extrahiereGgfs(text){
   nachrichtenSeitExtraktion++;
@@ -1231,7 +1254,8 @@ function baueExtraktionsPrompt(transkript, bekannteKnotenText, bekannteErinnerun
     {"pfad": ["Kategorie", "Unterknoten"], "typ": "person|thema|ereignis|ziel|traum|angst|eigenschaft|praeferenz|grenze", "neue_fakten": ["..."], "wichtigkeit": 0, "emotion": "positiv|negativ|neutral|gemischt", "verfall": "nie|langsam|normal|schnell"}
   ],
   "neue_muster": [{"thema": "...", "beobachtung": "...", "ausloeser": "...", "entwicklung": "..."}],
-  "stimmung": {"text": "...", "einschaetzung": "positiv|negativ|neutral", "vermutete_ursachen_pfade": [["Kategorie","Unterknoten"]]}
+  "stimmung": {"text": "...", "einschaetzung": "positiv|negativ|neutral", "vermutete_ursachen_pfade": [["Kategorie","Unterknoten"]]},
+  "loeschungen": [{"pfad": ["Kategorie", "Unterknoten"]}]
 }
 
 Erlaubte Kategorien (erstes Element von "pfad"): Familie, Beruf, Hobbys, Gesundheit, Persönlichkeit, Vorlieben, Grenzen, Ziele, Träume, Ängste, Sonstiges.
@@ -1249,6 +1273,7 @@ Wichtige Regeln:
 - "neue_muster" NUR, wenn Jonas selbst explizit signalisiert, dass etwas wiederkehrend ist (Formulierungen wie "das ist bei mir immer so", "passiert mir öfter", "seit Monaten schon", "das kommt immer wieder"). Ein einzelnes Erwähnen, auch wenn es ernst ist, ist KEIN Muster – das gehört stattdessen als normale "aktualisierung". Sei hier sehr zurückhaltend. Bereits bekannte Muster: ${bekannteMusterText}. Bei erneuter Erwähnung eines bekannten Musters denselben "thema"-Namen zurückgeben.
 - "stimmung" NUR setzen, wenn Jonas in der neuesten Nachricht erkennbar über seine aktuelle Stimmung/Verfassung schreibt (gut, schlecht, gestresst, erschöpft etc.) – sonst weglassen (null lassen bzw. Feld weglassen). "vermutete_ursachen_pfade" nur, wenn im Kontext ein plausibler Zusammenhang erkennbar ist (z.B. Streit, wenig Schlaf, viel Arbeit) – rate nicht wild, im Zweifel leer lassen.
 - Termine mit einem konkreten Datum oder uhrzeitgenaue Kurzzeit-Erinnerungen NICHT hier verarbeiten (das läuft über einen separaten Prozess) – ignoriere Formulierungen wie "erinnere mich in 10 Minuten" komplett in dieser Antwort. Bereits vorhandene, noch nicht fällige Erinnerungen (nur zur Einordnung, hier nichts draus ableiten): ${bekannteErinnerungenText}.
+- "loeschungen" NUR, wenn Jonas in der neuesten Nachricht EINDEUTIG und EXPLIZIT darum bittet, etwas zu löschen/vergessen (Formulierungen wie "lösch das", "vergiss, dass ich...", "das musst du dir nicht merken", "lösch alles zum Thema X"). Der "pfad" MUSS exakt einem der bereits bekannten Knoten entsprechen (siehe Liste oben) – erfinde keinen neuen Pfad zum Löschen und rate nicht, welcher Knoten gemeint sein könnte, wenn es nicht eindeutig ist. Ein Löschwunsch zu einer ganzen Kategorie oder einem Oberthema (z.B. "vergiss alles über meine Familie") darf den kompletten Pfad bis zu dieser Ebene angeben (z.B. ["Familie"]) – das entfernt dann automatisch auch alle darunterliegenden Knoten. Im Zweifel: nichts löschen.
 - Erfinde nichts. Lasse Arrays leer bzw. "stimmung" weg, wenn nichts Eindeutiges erkennbar ist.
 
 Gesprächsausschnitt:
@@ -1331,8 +1356,21 @@ async function verarbeiteAusschnitt(transkript){
       });
     }
 
+    const geloeschteNamen = [];
+    for(const l of parsed.loeschungen||[]){
+      if(!l.pfad || !l.pfad.length) continue;
+      const entfernt = await loescheKnotenUnterPfad(l.pfad);
+      if(entfernt.length) geloeschteNamen.push(l.pfad[l.pfad.length-1]);
+    }
+    if(geloeschteNamen.length){
+      const hinweis = document.createElement('div');
+      hinweis.className = 'system-hinweis';
+      hinweis.textContent = `🗑️ Aus dem Lebensmodell entfernt: ${geloeschteNamen.join(', ')}`;
+      $('thread').appendChild(hinweis);
+    }
+
     const hatNeues = (parsed.aktualisierungen||[]).length || (parsed.neue_muster||[]).length ||
-      (parsed.stimmung && parsed.stimmung.text);
+      (parsed.stimmung && parsed.stimmung.text) || geloeschteNamen.length;
     if(hatNeues){
       aktuellesGedaechtnis = await ladeGedaechtnis();
       pruefeErinnerung(aktuellesGedaechtnis);
