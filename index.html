@@ -128,17 +128,17 @@
 
     <div style="margin-top:12px;">KI-Anbieter</div>
     <select id="anbieterSelect">
-      <option value="groq">Kostenlose Kette: Groq → Google → Claude</option>
+      <option value="groq">Kostenlose Kette: Groq → Mistral → Claude</option>
       <option value="anthropic">Nur Anthropic (Claude, bezahlt)</option>
     </select>
 
     <div>Groq API Key</div>
     <input id="groqKey" placeholder="gsk_...">
-    <div>Google (Gemini) API Key</div>
-    <input id="googleKey" placeholder="AIza...">
+    <div>Mistral API Key</div>
+    <input id="mistralKey" placeholder="...">
     <div>Anthropic API Key</div>
     <input id="antKey" placeholder="sk-ant-...">
-    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Google, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Anthropic (Claude, kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Unter jeder Antwort steht klein, welcher Anbieter geantwortet hat. Alle drei Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
+    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Mistral, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Anthropic (Claude, kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Unter jeder Antwort steht klein, welcher Anbieter geantwortet hat. Alle drei Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Dein Lebensmodell (Personen, Themen, Muster, Stimmungen, das komplette Gesprächsarchiv) wird ausschließlich lokal in diesem Browser gespeichert (IndexedDB) – niemals in der Cloud. Nur Termine/Erinnerungen und Push-Anmeldungen laufen weiterhin über Supabase, damit Benachrichtigungen geräteübergreifend funktionieren. Für die eigentliche Verarbeitung (Antworten, Auswertung neuer Nachrichten) werden Texte wie bisher direkt an den gewählten KI-Anbieter geschickt.</div>
@@ -191,7 +191,7 @@ function getKeys(){
     sbKey: localStorage.getItem('halt_sb_key') || '',
     antKey: localStorage.getItem('halt_ant_key') || '',
     groqKey: localStorage.getItem('halt_groq_key') || '',
-    googleKey: localStorage.getItem('halt_google_key') || ''
+    mistralKey: localStorage.getItem('halt_mistral_key') || ''
   };
 }
 function aktiverAnbieter(){
@@ -214,7 +214,7 @@ $('settingsBtn').onclick = () => {
   s.style.display = s.style.display === 'none' ? 'block' : 'none';
   const k = getKeys();
   $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey;
-  $('antKey').value = k.antKey; $('groqKey').value = k.groqKey; $('googleKey').value = k.googleKey;
+  $('antKey').value = k.antKey; $('groqKey').value = k.groqKey; $('mistralKey').value = k.mistralKey;
   $('anbieterSelect').value = aktiverAnbieter();
 };
 $('saveKeys').onclick = () => {
@@ -222,7 +222,7 @@ $('saveKeys').onclick = () => {
   localStorage.setItem('halt_sb_key', $('sbKey').value.trim());
   localStorage.setItem('halt_ant_key', $('antKey').value.trim());
   localStorage.setItem('halt_groq_key', $('groqKey').value.trim());
-  localStorage.setItem('halt_google_key', $('googleKey').value.trim());
+  localStorage.setItem('halt_mistral_key', $('mistralKey').value.trim());
   localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
   $('setup').style.display = 'none';
   init();
@@ -362,17 +362,17 @@ const werkzeuge = [
   }
 ];
 
-// Wird nach jedem erfolgreichen Aufruf gesetzt ('groq' | 'google' | 'anthropic'), damit die
+// Wird nach jedem erfolgreichen Aufruf gesetzt ('groq' | 'mistral' | 'anthropic'), damit die
 // aufrufende Stelle anzeigen kann, welcher Anbieter tatsächlich geantwortet hat.
 let letzterAntwortAnbieter = null;
 
 function anbieterLabel(code){
-  return { groq: 'Groq', google: 'Google', anthropic: 'Claude' }[code] || code;
+  return { groq: 'Groq', mistral: 'Mistral', anthropic: 'Claude' }[code] || code;
 }
 
 // Prüft anbieterunabhängig, ob eine Antwort auf ein Rate-/Kontingent-Limit hindeutet
-// (jeder Anbieter formuliert das anders: Groq/OpenAI-Stil "rate_limit_exceeded",
-// Google "RESOURCE_EXHAUSTED"/"quota").
+// (jeder Anbieter formuliert das anders: Groq/Mistral im OpenAI-Stil "rate_limit_exceeded",
+// andere ggf. über "quota"/"resource_exhausted").
 function istKontingentFehler(res_status, data){
   const text = JSON.stringify(data.error || {});
   return res_status === 429 || /rate.?limit|resource_exhausted|quota/i.test(text);
@@ -407,44 +407,33 @@ async function ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante){
   return data.choices?.[0]?.message?.content || '';
 }
 
-// ---------- Google Gemini ----------
-// Bewusst ohne Werkzeug-Unterstützung (Wetter/Archiv-Suche) – Gemini nutzt dafür ein eigenes,
-// anderes Format. Für den Moment reicht das nicht so wichtig, Hauptsache Weiterchatten ohne
-// Kosten. Reine Text-Antworten (Chat + Extraktion) funktionieren aber wie bei den anderen.
-async function ruftGoogleAuf(systemPrompt, messages, maxTokens){
+// ---------- Mistral ----------
+// Bewusst ohne Werkzeug-Unterstützung (Wetter/Archiv-Suche) – dafür bräuchte es eine eigene
+// Übersetzung des Tool-Formats. Reicht fürs Erste nicht so wichtig, Hauptsache Weiterchatten
+// ohne Kosten. Reine Text-Antworten (Chat + Extraktion) funktionieren wie bei den anderen.
+// Mistrals Chat-API ist wie bei Groq im OpenAI-Stil aufgebaut (gleiche Rollen user/assistant/system).
+async function ruftMistralAuf(systemPrompt, messages, maxTokens){
   const k = getKeys();
-  const contents = messages.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
-  }));
   const body = {
-    contents,
-    generationConfig: { maxOutputTokens: maxTokens }
+    model: 'mistral-small-latest',
+    max_tokens: maxTokens,
+    messages: systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages
   };
-  if(systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
-
-  // Key bewusst als Header (x-goog-api-key) statt als ?key=-Query-Parameter geschickt: Google stellt
-  // gerade von alten "AIza..."-Keys auf neue "AQ...."-Authentication-Keys um, und der Header-Weg ist
-  // dafür der von Google offiziell empfohlene, zuverlässigere Übertragungsweg für den nativen Endpunkt.
-  const res = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
-    {
-      method:'POST',
-      headers:{'Content-Type':'application/json', 'x-goog-api-key': k.googleKey},
-      body: JSON.stringify(body)
-    }
-  );
+  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization': `Bearer ${k.mistralKey}`},
+    body: JSON.stringify(body)
+  });
   const data = await res.json();
   if(istKontingentFehler(res.status, data)){
-    const fehler = new Error((data.error && data.error.message) || 'Google-Kontingent erschöpft');
+    const fehler = new Error((data.error && data.error.message) || 'Mistral-Kontingent erschöpft');
     fehler.kontingent = true;
     throw fehler;
   }
   if(!res.ok || data.error){
-    throw new Error((data.error && data.error.message) || `Google HTTP ${res.status}`);
+    throw new Error((data.error && data.error.message) || `Mistral HTTP ${res.status}`);
   }
-  const teile = data.candidates?.[0]?.content?.parts || [];
-  return teile.map(t => t.text || '').join('');
+  return data.choices?.[0]?.message?.content || '';
 }
 
 // ---------- Anthropic (Claude) ----------
@@ -502,19 +491,19 @@ async function ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools){
   }
 }
 
-// ---------- Einheitlicher LLM-Aufruf: versucht die kostenlose Kette Groq -> Google -> Claude ----------
+// ---------- Einheitlicher LLM-Aufruf: versucht die kostenlose Kette Groq -> Mistral -> Claude ----------
 // modellVariante: 'haupt' (normale Chat-Antwort) oder 'extraktion' (Hintergrund-Extraktion).
 // anbieterOverride erzwingt EINEN bestimmten Anbieter direkt (z.B. für Wetter-Fragen, die nur
 // Claude per Werkzeug beantworten kann) und überspringt die Kette komplett.
-// Ohne Override wird versucht: Groq zuerst (kostenlos), bei Kontingent-Fehler weiter zu Google
+// Ohne Override wird versucht: Groq zuerst (kostenlos), bei Kontingent-Fehler weiter zu Mistral
 // (ebenfalls kostenlos), erst wenn auch das ausgeschöpft ist als letzter Ausweg Claude (bezahlt) –
 // jeweils nur, wenn der entsprechende Key überhaupt hinterlegt ist.
 async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride, modellVariante='haupt'){
   const k = getKeys();
 
   if(anbieterOverride){
-    const text = anbieterOverride === 'google'
-      ? await ruftGoogleAuf(systemPrompt, messages, maxTokens)
+    const text = anbieterOverride === 'mistral'
+      ? await ruftMistralAuf(systemPrompt, messages, maxTokens)
       : anbieterOverride === 'groq'
         ? await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante)
         : await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
@@ -530,7 +519,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
 
   const kette = [];
   if(k.groqKey) kette.push('groq');
-  if(k.googleKey) kette.push('google');
+  if(k.mistralKey) kette.push('mistral');
   if(k.antKey) kette.push('anthropic');
   if(!kette.length) throw new Error('Kein API-Key hinterlegt – bitte in den Einstellungen mindestens einen KI-Anbieter eintragen.');
 
@@ -538,7 +527,7 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
   for(const anbieter of kette){
     try{
       const text = anbieter === 'groq' ? await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante)
-        : anbieter === 'google' ? await ruftGoogleAuf(systemPrompt, messages, maxTokens)
+        : anbieter === 'mistral' ? await ruftMistralAuf(systemPrompt, messages, maxTokens)
         : await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
       letzterAntwortAnbieter = anbieter;
       return text;
