@@ -114,9 +114,9 @@
   </header>
 
   <div id="modus">
-    <button id="modusErinnerung" data-modus="erinnerung" class="aktiv">Erinnerung</button>
+    <button id="modusErinnerung" data-modus="erinnerung">Erinnerung</button>
     <button id="modusAllgemein" data-modus="allgemein">Allgemein</button>
-    <button id="modusPersoenlich" data-modus="persoenlich">Persönlich</button>
+    <button id="modusPersoenlich" data-modus="persoenlich" class="aktiv">Persönlich</button>
   </div>
 
   <div id="setup" style="display:none;">
@@ -1002,7 +1002,7 @@ function renderNachricht(role, content, pending=false){
 }
 
 // ---------- Modus: Erinnerung / Allgemein / Persönlich ----------
-let aktuellerModus = 'erinnerung';
+let aktuellerModus = 'persoenlich';
 document.querySelectorAll('#modus button').forEach(btn => {
   btn.onclick = () => {
     aktuellerModus = btn.dataset.modus;
