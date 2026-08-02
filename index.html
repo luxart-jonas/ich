@@ -41,6 +41,7 @@
   .msg.assistant{align-self:flex-start;background:var(--bg-card);border:1px solid var(--border);
     border-bottom-left-radius:3px;}
   .msg.pending{opacity:.5;}
+  .msg-anbieter{font-size:10px;color:var(--text-faint);margin-top:5px;letter-spacing:.03em;text-transform:uppercase;}
   .system-hinweis{align-self:center;font-size:11.5px;color:var(--text-faint);text-align:center;
     padding:2px 10px;}
   #thread .empty{color:var(--text-faint);font-size:13px;text-align:center;margin-top:40px;}
@@ -127,15 +128,17 @@
 
     <div style="margin-top:12px;">KI-Anbieter</div>
     <select id="anbieterSelect">
-      <option value="anthropic">Anthropic (Claude)</option>
-      <option value="groq">Groq (Llama, schneller & kostenlos)</option>
+      <option value="groq">Kostenlose Kette: Groq → Google → Claude</option>
+      <option value="anthropic">Nur Anthropic (Claude, bezahlt)</option>
     </select>
 
-    <div>Anthropic API Key</div>
-    <input id="antKey" placeholder="sk-ant-...">
     <div>Groq API Key</div>
     <input id="groqKey" placeholder="gsk_...">
-    <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic. Wenn Groq ein Tages- oder Minuten-Kontingent meldet und zusätzlich ein Anthropic-Key hinterlegt ist, schaltet die App für diese eine Antwort automatisch kurz auf Claude um (du siehst dann einen kleinen Hinweis im Chat). Die Hintergrund-Extraktion läuft bei Groq zudem über ein leichteres Modell mit eigenem, separatem Tageskontingent.</div>
+    <div>Google (Gemini) API Key</div>
+    <input id="googleKey" placeholder="AIza...">
+    <div>Anthropic API Key</div>
+    <input id="antKey" placeholder="sk-ant-...">
+    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Google, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Anthropic (Claude, kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Unter jeder Antwort steht klein, welcher Anbieter geantwortet hat. Alle drei Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Dein Lebensmodell (Personen, Themen, Muster, Stimmungen, das komplette Gesprächsarchiv) wird ausschließlich lokal in diesem Browser gespeichert (IndexedDB) – niemals in der Cloud. Nur Termine/Erinnerungen und Push-Anmeldungen laufen weiterhin über Supabase, damit Benachrichtigungen geräteübergreifend funktionieren. Für die eigentliche Verarbeitung (Antworten, Auswertung neuer Nachrichten) werden Texte wie bisher direkt an den gewählten KI-Anbieter geschickt.</div>
@@ -187,7 +190,8 @@ function getKeys(){
     sbUrl: localStorage.getItem('halt_sb_url') || '',
     sbKey: localStorage.getItem('halt_sb_key') || '',
     antKey: localStorage.getItem('halt_ant_key') || '',
-    groqKey: localStorage.getItem('halt_groq_key') || ''
+    groqKey: localStorage.getItem('halt_groq_key') || '',
+    googleKey: localStorage.getItem('halt_google_key') || ''
   };
 }
 function aktiverAnbieter(){
@@ -210,7 +214,7 @@ $('settingsBtn').onclick = () => {
   s.style.display = s.style.display === 'none' ? 'block' : 'none';
   const k = getKeys();
   $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey;
-  $('antKey').value = k.antKey; $('groqKey').value = k.groqKey;
+  $('antKey').value = k.antKey; $('groqKey').value = k.groqKey; $('googleKey').value = k.googleKey;
   $('anbieterSelect').value = aktiverAnbieter();
 };
 $('saveKeys').onclick = () => {
@@ -218,6 +222,7 @@ $('saveKeys').onclick = () => {
   localStorage.setItem('halt_sb_key', $('sbKey').value.trim());
   localStorage.setItem('halt_ant_key', $('antKey').value.trim());
   localStorage.setItem('halt_groq_key', $('groqKey').value.trim());
+  localStorage.setItem('halt_google_key', $('googleKey').value.trim());
   localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
   $('setup').style.display = 'none';
   init();
@@ -357,44 +362,88 @@ const werkzeuge = [
   }
 ];
 
-// Wird auf true gesetzt, wenn ein Groq-Aufruf wegen Rate-Limit automatisch auf Anthropic
-// umgeleitet wurde – die aufrufende Stelle kann das danach auslesen, um z.B. einen Hinweis
-// im Chat anzuzeigen, und muss es vorher selbst zurücksetzen.
-let groqFallbackAusgeloest = false;
+// Wird nach jedem erfolgreichen Aufruf gesetzt ('groq' | 'google' | 'anthropic'), damit die
+// aufrufende Stelle anzeigen kann, welcher Anbieter tatsächlich geantwortet hat.
+let letzterAntwortAnbieter = null;
 
-// ---------- Einheitlicher LLM-Aufruf, je nach gewähltem (oder überschriebenem) Anbieter ----------
-// modellVariante: 'haupt' (normale Chat-Antwort) oder 'extraktion' (Hintergrund-Extraktion).
-// Bei Groq nutzt die Extraktion bewusst ein anderes, leichteres Modell – Groqs Tageskontingent
-// (TPD) wird pro Modell getrennt gezählt, dadurch konkurriert die Extraktion nicht mit dem
-// Kontingent der eigentlichen Chat-Antworten.
-async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride, modellVariante='haupt'){
+function anbieterLabel(code){
+  return { groq: 'Groq', google: 'Google', anthropic: 'Claude' }[code] || code;
+}
+
+// Prüft anbieterunabhängig, ob eine Antwort auf ein Rate-/Kontingent-Limit hindeutet
+// (jeder Anbieter formuliert das anders: Groq/OpenAI-Stil "rate_limit_exceeded",
+// Google "RESOURCE_EXHAUSTED"/"quota").
+function istKontingentFehler(res_status, data){
+  const text = JSON.stringify(data.error || {});
+  return res_status === 429 || /rate.?limit|resource_exhausted|quota/i.test(text);
+}
+
+// ---------- Groq ----------
+async function ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante){
   const k = getKeys();
-  const anbieter = anbieterOverride || aktiverAnbieter();
-  if(anbieter === 'groq'){
-    const groqModell = modellVariante === 'extraktion' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile';
-    const body = {
-      model: groqModell,
-      max_tokens: maxTokens,
-      messages: systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages
-    };
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method:'POST',
-      headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${k.groqKey}`},
-      body: JSON.stringify(body)
-    });
-    const data = await res.json();
-    const istRateLimit = res.status === 429 ||
-      (data.error && /rate.?limit/i.test(data.error.type || data.error.code || data.error.message || ''));
-    if(istRateLimit && k.antKey){
-      console.warn('Groq-Kontingent erschöpft, weiche automatisch auf Anthropic aus.', data.error);
-      groqFallbackAusgeloest = true;
-      return chatCompletion(systemPrompt, messages, maxTokens, mitTools, 'anthropic', modellVariante);
-    }
-    if(!res.ok || data.error){
-      throw new Error((data.error && data.error.message) || `Groq HTTP ${res.status}`);
-    }
-    return data.choices?.[0]?.message?.content || '';
-  }else if(mitTools){
+  // Extraktion nutzt bewusst ein anderes, leichteres Modell – Groqs Tageskontingent (TPD) wird
+  // pro Modell getrennt gezählt, dadurch konkurriert die Extraktion nicht mit dem Kontingent
+  // der eigentlichen Chat-Antworten.
+  const groqModell = modellVariante === 'extraktion' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile';
+  const body = {
+    model: groqModell,
+    max_tokens: maxTokens,
+    messages: systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages
+  };
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization':`Bearer ${k.groqKey}`},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if(istKontingentFehler(res.status, data)){
+    const fehler = new Error((data.error && data.error.message) || 'Groq-Kontingent erschöpft');
+    fehler.kontingent = true;
+    throw fehler;
+  }
+  if(!res.ok || data.error){
+    throw new Error((data.error && data.error.message) || `Groq HTTP ${res.status}`);
+  }
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// ---------- Google Gemini ----------
+// Bewusst ohne Werkzeug-Unterstützung (Wetter/Archiv-Suche) – Gemini nutzt dafür ein eigenes,
+// anderes Format. Für den Moment reicht das nicht so wichtig, Hauptsache Weiterchatten ohne
+// Kosten. Reine Text-Antworten (Chat + Extraktion) funktionieren aber wie bei den anderen.
+async function ruftGoogleAuf(systemPrompt, messages, maxTokens){
+  const k = getKeys();
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
+  }));
+  const body = {
+    contents,
+    generationConfig: { maxOutputTokens: maxTokens }
+  };
+  if(systemPrompt) body.systemInstruction = { parts: [{ text: systemPrompt }] };
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${k.googleKey}`,
+    { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }
+  );
+  const data = await res.json();
+  if(istKontingentFehler(res.status, data)){
+    const fehler = new Error((data.error && data.error.message) || 'Google-Kontingent erschöpft');
+    fehler.kontingent = true;
+    throw fehler;
+  }
+  if(!res.ok || data.error){
+    throw new Error((data.error && data.error.message) || `Google HTTP ${res.status}`);
+  }
+  const teile = data.candidates?.[0]?.content?.parts || [];
+  return teile.map(t => t.text || '').join('');
+}
+
+// ---------- Anthropic (Claude) ----------
+async function ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools){
+  const k = getKeys();
+  if(mitTools){
     // Tool-Use-Schleife: Claude kann bei Bedarf wetter_abfragen / archiv_durchsuchen aufrufen
     let laufendeMessages = [...messages];
     for(let runde = 0; runde < 3; runde++){
@@ -444,6 +493,55 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
     }
     return (data.content||[]).map(c=>c.text||'').join('');
   }
+}
+
+// ---------- Einheitlicher LLM-Aufruf: versucht die kostenlose Kette Groq -> Google -> Claude ----------
+// modellVariante: 'haupt' (normale Chat-Antwort) oder 'extraktion' (Hintergrund-Extraktion).
+// anbieterOverride erzwingt EINEN bestimmten Anbieter direkt (z.B. für Wetter-Fragen, die nur
+// Claude per Werkzeug beantworten kann) und überspringt die Kette komplett.
+// Ohne Override wird versucht: Groq zuerst (kostenlos), bei Kontingent-Fehler weiter zu Google
+// (ebenfalls kostenlos), erst wenn auch das ausgeschöpft ist als letzter Ausweg Claude (bezahlt) –
+// jeweils nur, wenn der entsprechende Key überhaupt hinterlegt ist.
+async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride, modellVariante='haupt'){
+  const k = getKeys();
+
+  if(anbieterOverride){
+    const text = anbieterOverride === 'google'
+      ? await ruftGoogleAuf(systemPrompt, messages, maxTokens)
+      : anbieterOverride === 'groq'
+        ? await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante)
+        : await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
+    letzterAntwortAnbieter = anbieterOverride;
+    return text;
+  }
+
+  if(aktiverAnbieter() === 'anthropic'){
+    const text = await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
+    letzterAntwortAnbieter = 'anthropic';
+    return text;
+  }
+
+  const kette = [];
+  if(k.groqKey) kette.push('groq');
+  if(k.googleKey) kette.push('google');
+  if(k.antKey) kette.push('anthropic');
+  if(!kette.length) throw new Error('Kein API-Key hinterlegt – bitte in den Einstellungen mindestens einen KI-Anbieter eintragen.');
+
+  let letzterFehler = null;
+  for(const anbieter of kette){
+    try{
+      const text = anbieter === 'groq' ? await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante)
+        : anbieter === 'google' ? await ruftGoogleAuf(systemPrompt, messages, maxTokens)
+        : await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
+      letzterAntwortAnbieter = anbieter;
+      return text;
+    }catch(e){
+      letzterFehler = e;
+      if(!e.kontingent) throw e; // andere Fehler (z.B. falscher Key) sofort melden, nicht stillschweigend weiterspringen
+      console.warn(`${anbieterLabel(anbieter)}-Kontingent ausgeschöpft, versuche nächsten Anbieter in der Kette…`, e.message);
+    }
+  }
+  throw letzterFehler || new Error('Kein KI-Anbieter verfügbar.');
 }
 
 // ---------- Supabase REST helpers (nur noch für Termine/Erinnerungen/Push) ----------
@@ -1074,16 +1172,16 @@ async function sendeNachricht(text){
   const nachrichtenFuerAnfrage = (aktuellerModus === 'persoenlich' || persoenlicherFallback) ? verlauf : [{role:'user', content:text}];
 
   try{
-    groqFallbackAusgeloest = false;
+    letzterAntwortAnbieter = null;
     const antwort = await chatCompletion(systemPrompt, nachrichtenFuerAnfrage, 700, true, brauchtWetterUmschaltung ? 'anthropic' : undefined, 'haupt');
-    if(groqFallbackAusgeloest){
-      const hinweis = document.createElement('div');
-      hinweis.className = 'system-hinweis';
-      hinweis.textContent = '⚡ Groq-Kontingent gerade erschöpft – kurz auf Claude umgeschaltet';
-      $('thread').insertBefore(hinweis, pendingEl);
-    }
     pendingEl.textContent = antwort || '...';
     pendingEl.classList.remove('pending');
+    if(letzterAntwortAnbieter){
+      const tag = document.createElement('div');
+      tag.className = 'msg-anbieter';
+      tag.textContent = anbieterLabel(letzterAntwortAnbieter);
+      pendingEl.appendChild(tag);
+    }
     verlauf.push({role:'assistant', content:antwort});
     dbHinzufuegen('nachrichten', {role:'assistant', content:antwort, created_at: new Date().toISOString()}).catch(console.error);
     if('speechSynthesis' in window && vorlesenAktiv) vorlesen(antwort);
