@@ -124,7 +124,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.9</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 3.0</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -515,6 +515,10 @@ function filterePersonenFuerNachricht(text, personen){
   );
 }
 
+function wirktPersoenlich(text){
+  return /was bewegt mich|wie geht'?s mir|was sind meine sorgen|meine sorgen|kennst du mich|was weißt du (über|von) mir|wer bin ich|erzähl (mir )?von mir|was denkst du über mich|wie fühl(e)? ich mich|was beschäftigt mich/i.test(text);
+}
+
 async function sendeNachricht(text){
   if(!text.trim()) return;
   if(!keysComplete()){
@@ -537,10 +541,20 @@ async function sendeNachricht(text){
     $('thread').appendChild(hinweis);
   }
 
+  // Auch außerhalb des Persönlich-Modus: wenn die Frage eindeutig persönlich klingt,
+  // für diese eine Nachricht automatisch das Gedächtnis mit dazuholen.
+  const persoenlicherFallback = aktuellerModus !== 'persoenlich' && wirktPersoenlich(text);
+  if(persoenlicherFallback){
+    const hinweis = document.createElement('div');
+    hinweis.className = 'system-hinweis';
+    hinweis.textContent = '🧠 Klingt persönlich – kurz mit deinem Gedächtnis abgeglichen';
+    $('thread').appendChild(hinweis);
+  }
+
   const pendingEl = renderNachricht('assistant', 'schreibt...', true);
 
   let systemPrompt;
-  if(aktuellerModus === 'persoenlich'){
+  if(aktuellerModus === 'persoenlich' || persoenlicherFallback){
     const schlankesGedaechtnis = { ...aktuellesGedaechtnis, personen: filterePersonenFuerNachricht(text, aktuellesGedaechtnis.personen) };
     systemPrompt = baueSystemPrompt(schlankesGedaechtnis);
   }else{
@@ -548,7 +562,7 @@ async function sendeNachricht(text){
   }
 
   // Im leichten Modus nur die aktuelle Nachricht schicken, nicht den ganzen Verlauf mit Gedächtnis-Bezug
-  const nachrichtenFuerAnfrage = aktuellerModus === 'persoenlich' ? verlauf : [{role:'user', content:text}];
+  const nachrichtenFuerAnfrage = (aktuellerModus === 'persoenlich' || persoenlicherFallback) ? verlauf : [{role:'user', content:text}];
 
   try{
     const antwort = await chatCompletion(systemPrompt, nachrichtenFuerAnfrage, 700, true, brauchtWetterUmschaltung ? 'anthropic' : undefined);
@@ -558,7 +572,7 @@ async function sendeNachricht(text){
     sb('halt_nachrichten', {method:'POST', body: JSON.stringify({role:'assistant', content:antwort}), prefer:'return=minimal'});
     if('speechSynthesis' in window && vorlesenAktiv) vorlesen(antwort);
 
-    if(aktuellerModus === 'persoenlich'){
+    if(aktuellerModus === 'persoenlich' || persoenlicherFallback){
       extrahiereGgfs(text);
     }else if(aktuellerModus === 'erinnerung'){
       verarbeiteErinnerungLeicht(text);
