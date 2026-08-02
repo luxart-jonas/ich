@@ -65,6 +65,16 @@
   #setup select{width:100%;background:var(--bg-card);border:1px solid var(--border);color:var(--text);
     padding:9px 10px;border-radius:8px;margin:6px 0;font-size:13px;}
 
+  #splash{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;
+    z-index:999;opacity:0;transition:opacity .4s ease;}
+  #splash.sichtbar{opacity:1;}
+  #splash.ausblenden{opacity:0;}
+  #splash-brain{width:90px;height:90px;animation:puls 1.1s ease-in-out infinite;}
+  @keyframes puls{
+    0%,100%{transform:scale(1);opacity:.85;}
+    50%{transform:scale(1.15);opacity:1;}
+  }
+
   #erinnerungen{display:flex;flex-direction:column;gap:8px;padding:0 16px;margin-top:12px;}
   .erinnerung-karte{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--gold);
     border-radius:10px;padding:11px 13px;}
@@ -75,6 +85,13 @@
 </head>
 <body>
 <div id="app">
+
+<div id="splash">
+  <svg id="splash-brain" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <path d="M -95,-40 C -95,-95 -50,-118 -18,-108 C -2,-125 28,-125 44,-108 C 78,-120 118,-95 118,-48 C 138,-38 142,-6 122,14 C 132,42 112,74 80,78 C 74,102 46,118 18,110 C 6,124 -18,126 -32,112 C -60,120 -90,100 -92,72 C -122,64 -134,30 -116,4 C -132,-16 -122,-38 -95,-40 Z"
+      transform="translate(256,266)" fill="none" stroke="#c8952f" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>
+</div>
 
   <header>
     <div class="brand"><span class="dot"></span><h1>Ich</h1></div>
@@ -107,7 +124,7 @@
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Nichts wird an Dritte außer Supabase/Anthropic direkt gesendet.</div>
-    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.8</div>
+    <div class="hint" style="margin-top:14px;opacity:.6;">Version 2.9</div>
     <button id="vervollstaendigenBtn" style="margin-top:10px;">Gedächtnis vervollständigen</button>
     <div class="hint">Geht das komplette bisherige Gespräch nochmal durch und trägt nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
@@ -855,6 +872,33 @@ $('textInput').addEventListener('keydown', e => {
 $('textInput').addEventListener('focus', () => {
   setTimeout(() => $('inputbar').scrollIntoView({block:'end', behavior:'smooth'}), 300);
 });
+
+// ---------- Vollbild-Animation beim Öffnen über eine Push-Nachricht ----------
+function zeigeSplash(){
+  const el = $('splash');
+  el.style.display = 'flex';
+  requestAnimationFrame(() => el.classList.add('sichtbar'));
+  setTimeout(() => {
+    el.classList.add('ausblenden');
+    setTimeout(() => {
+      el.style.display = 'none';
+      el.classList.remove('sichtbar', 'ausblenden');
+    }, 400);
+  }, 1600);
+}
+
+// Fall 1: App wurde frisch über die Push-Nachricht geöffnet (neues Fenster)
+if(new URLSearchParams(location.search).get('splash') === '1'){
+  zeigeSplash();
+  history.replaceState({}, '', location.pathname); // URL wieder sauber machen
+}
+
+// Fall 2: App war schon offen, Push-Klick hat sie nur fokussiert
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if(e.data && e.data.type === 'zeige-splash') zeigeSplash();
+  });
+}
 
 async function init(){
   if(!keysComplete()) return;

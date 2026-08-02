@@ -26,11 +26,15 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: 'window' }).then((clientList) => {
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          client.focus();
+          client.postMessage({ type: 'zeige-splash' });
+          return;
+        }
       }
-      if (clients.openWindow) return clients.openWindow('./index.html');
+      if (clients.openWindow) return clients.openWindow('./index.html?splash=1');
     })
   );
 });
