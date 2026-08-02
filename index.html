@@ -135,7 +135,7 @@
     <input id="antKey" placeholder="sk-ant-...">
     <div>Groq API Key</div>
     <input id="groqKey" placeholder="gsk_...">
-    <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
+    <div class="hint">Du kannst jederzeit zwischen den beiden Anbietern wechseln, ohne Daten zu verlieren – beide Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic. Wenn Groq ein Tages- oder Minuten-Kontingent meldet und zusätzlich ein Anthropic-Key hinterlegt ist, schaltet die App für diese eine Antwort automatisch kurz auf Claude um (du siehst dann einen kleinen Hinweis im Chat). Die Hintergrund-Extraktion läuft bei Groq zudem über ein leichteres Modell mit eigenem, separatem Tageskontingent.</div>
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Dein Lebensmodell (Personen, Themen, Muster, Stimmungen, das komplette Gesprächsarchiv) wird ausschließlich lokal in diesem Browser gespeichert (IndexedDB) – niemals in der Cloud. Nur Termine/Erinnerungen und Push-Anmeldungen laufen weiterhin über Supabase, damit Benachrichtigungen geräteübergreifend funktionieren. Für die eigentliche Verarbeitung (Antworten, Auswertung neuer Nachrichten) werden Texte wie bisher direkt an den gewählten KI-Anbieter geschickt.</div>
@@ -357,13 +357,23 @@ const werkzeuge = [
   }
 ];
 
+// Wird auf true gesetzt, wenn ein Groq-Aufruf wegen Rate-Limit automatisch auf Anthropic
+// umgeleitet wurde – die aufrufende Stelle kann das danach auslesen, um z.B. einen Hinweis
+// im Chat anzuzeigen, und muss es vorher selbst zurücksetzen.
+let groqFallbackAusgeloest = false;
+
 // ---------- Einheitlicher LLM-Aufruf, je nach gewähltem (oder überschriebenem) Anbieter ----------
-async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride){
+// modellVariante: 'haupt' (normale Chat-Antwort) oder 'extraktion' (Hintergrund-Extraktion).
+// Bei Groq nutzt die Extraktion bewusst ein anderes, leichteres Modell – Groqs Tageskontingent
+// (TPD) wird pro Modell getrennt gezählt, dadurch konkurriert die Extraktion nicht mit dem
+// Kontingent der eigentlichen Chat-Antworten.
+async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride, modellVariante='haupt'){
   const k = getKeys();
   const anbieter = anbieterOverride || aktiverAnbieter();
   if(anbieter === 'groq'){
+    const groqModell = modellVariante === 'extraktion' ? 'llama-3.1-8b-instant' : 'llama-3.3-70b-versatile';
     const body = {
-      model: 'llama-3.3-70b-versatile',
+      model: groqModell,
       max_tokens: maxTokens,
       messages: systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages
     };
@@ -373,6 +383,13 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
       body: JSON.stringify(body)
     });
     const data = await res.json();
+    const istRateLimit = res.status === 429 ||
+      (data.error && /rate.?limit/i.test(data.error.type || data.error.code || data.error.message || ''));
+    if(istRateLimit && k.antKey){
+      console.warn('Groq-Kontingent erschöpft, weiche automatisch auf Anthropic aus.', data.error);
+      groqFallbackAusgeloest = true;
+      return chatCompletion(systemPrompt, messages, maxTokens, mitTools, 'anthropic', modellVariante);
+    }
     if(!res.ok || data.error){
       throw new Error((data.error && data.error.message) || `Groq HTTP ${res.status}`);
     }
@@ -1057,7 +1074,14 @@ async function sendeNachricht(text){
   const nachrichtenFuerAnfrage = (aktuellerModus === 'persoenlich' || persoenlicherFallback) ? verlauf : [{role:'user', content:text}];
 
   try{
-    const antwort = await chatCompletion(systemPrompt, nachrichtenFuerAnfrage, 700, true, brauchtWetterUmschaltung ? 'anthropic' : undefined);
+    groqFallbackAusgeloest = false;
+    const antwort = await chatCompletion(systemPrompt, nachrichtenFuerAnfrage, 700, true, brauchtWetterUmschaltung ? 'anthropic' : undefined, 'haupt');
+    if(groqFallbackAusgeloest){
+      const hinweis = document.createElement('div');
+      hinweis.className = 'system-hinweis';
+      hinweis.textContent = '⚡ Groq-Kontingent gerade erschöpft – kurz auf Claude umgeschaltet';
+      $('thread').insertBefore(hinweis, pendingEl);
+    }
     pendingEl.textContent = antwort || '...';
     pendingEl.classList.remove('pending');
     verlauf.push({role:'assistant', content:antwort});
@@ -1159,7 +1183,7 @@ Wenn kein klares Datum/keine Uhrzeit erkennbar ist, beide Arrays leer lassen –
 Nachricht: ${nachricht}`;
 
   try{
-    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 400)).replace(/```json|```/g,'').trim();
+    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 400, false, undefined, 'extraktion')).replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
     for(const z of parsed.neue_zeit_erinnerungen||[]){
       await sb('halt_zeit_erinnerungen', {method:'POST', body: JSON.stringify(z), prefer:'return=minimal'});
@@ -1175,17 +1199,21 @@ Nachricht: ${nachricht}`;
 }
 
 async function verarbeiteAusschnitt(transkript){
+  // Auf die wichtigsten/aktuellsten Knoten gedeckelt (statt aller je bekannten Knoten) – sonst
+  // wächst dieser Prompt und damit der Token-Verbrauch unbegrenzt mit eurem Lebensmodell mit.
   const bekannteKnotenText = (aktuellesGedaechtnis.knoten||[])
     .filter(k => k.typ !== 'ordner' && k.wichtigkeit != null)
+    .sort((a,b) => effektiveWichtigkeit(b) - effektiveWichtigkeit(a))
+    .slice(0, 30)
     .map(k => `${k.pfad.join(' > ')} (${k.wichtigkeit}%)`).join('; ') || 'keine bisher';
   const bekannteErinnerungenText = (aktuellesGedaechtnis.zeitErinnerungen||[]).map(z=>z.text).join(', ') || 'keine bisher';
   const bekannteMusterText = (aktuellesGedaechtnis.knoten||[])
-    .filter(k => k.typ === 'muster').map(k => k.pfad[k.pfad.length-1]).join(', ') || 'keine bisher';
+    .filter(k => k.typ === 'muster').slice(0, 20).map(k => k.pfad[k.pfad.length-1]).join(', ') || 'keine bisher';
 
   const prompt = baueExtraktionsPrompt(transkript, bekannteKnotenText, bekannteErinnerungenText, bekannteMusterText);
 
   try{
-    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 900)).replace(/```json|```/g,'').trim();
+    const raw = (await chatCompletion(null, [{role:'user', content:prompt}], 900, false, undefined, 'extraktion')).replace(/```json|```/g,'').trim();
     const parsed = JSON.parse(raw);
 
     for(const u of parsed.aktualisierungen||[]){
