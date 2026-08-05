@@ -101,9 +101,24 @@
     border:1px solid var(--border);border-radius:9px;font-size:12.5px;color:var(--text-dim);
     display:flex;align-items:center;justify-content:space-between;gap:8px;}
   #lebensmodellAnsicht .lm-stimmung span{flex:1;}
-  #lebensmodellAnsicht .lm-loeschen{background:none;border:none;color:var(--text-faint);
-    cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0;line-height:1;}
+  #lebensmodellAnsicht .lm-aktionen{display:flex;gap:2px;flex-shrink:0;}
+  #lebensmodellAnsicht .lm-loeschen, #lebensmodellAnsicht .lm-bearbeiten{background:none;border:none;
+    color:var(--text-faint);cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0;line-height:1;}
   #lebensmodellAnsicht .lm-loeschen:hover{color:var(--danger);}
+  #lebensmodellAnsicht .lm-bearbeiten:hover{color:var(--gold-soft);}
+  #lebensmodellAnsicht .lm-feld-label{font-size:11px;color:var(--text-faint);margin:8px 0 2px;}
+  #lebensmodellAnsicht .lm-bearbeiten-modus input[type=text],
+  #lebensmodellAnsicht .lm-bearbeiten-modus input[type=number],
+  #lebensmodellAnsicht .lm-bearbeiten-modus select,
+  #lebensmodellAnsicht .lm-bearbeiten-modus textarea{
+    width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);
+    padding:7px 8px;border-radius:7px;font-size:12.5px;font-family:inherit;}
+  #lebensmodellAnsicht .lm-bearbeiten-modus textarea{resize:vertical;min-height:44px;}
+  #lebensmodellAnsicht .lm-bearbeiten-btnzeile{display:flex;gap:8px;margin-top:10px;}
+  #lebensmodellAnsicht .lm-speichern{background:var(--gold);border:none;color:#1a1a17;
+    padding:7px 14px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;}
+  #lebensmodellAnsicht .lm-abbrechen{background:none;border:1px solid var(--border);color:var(--text-dim);
+    padding:7px 14px;border-radius:8px;font-size:12.5px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -178,6 +193,11 @@
   <div id="lebensmodellAnsicht">
     <button class="lm-schliessen" id="lebensmodellSchliessenBtn">← zurück</button>
     <div id="lebensmodellInhalt"></div>
+    <datalist id="lmKategorienListe">
+      <option value="Familie"><option value="Beruf"><option value="Hobbys"><option value="Gesundheit">
+      <option value="Persönlichkeit"><option value="Vorlieben"><option value="Grenzen"><option value="Ziele">
+      <option value="Träume"><option value="Ängste"><option value="Muster"><option value="Sonstiges">
+    </datalist>
   </div>
 
   <div id="erinnerungen"></div>
@@ -1013,6 +1033,301 @@ async function pruefeErstlauf(){
 // aufAktualisieren: Callback, der nach einer manuellen Löschung die Ansicht neu aufbaut
 // (damit falsch abgespeicherte Einträge direkt hier korrigiert werden können, unabhängig
 // davon, ob die KI eine Löschbitte im Chat sauber erkennt).
+const LM_KNOTEN_TYPEN = ['person','thema','ereignis','ziel','traum','angst','eigenschaft','praeferenz','grenze','muster'];
+
+// Baut die Lese-Ansicht eines einzelnen Knotens in "box" auf (leert box vorher). Wird sowohl
+// beim ersten Aufbau der Liste als auch nach "Abbrechen" im Bearbeiten-Formular genutzt.
+function fuelleKnotenAnsicht(box, e, aufAktualisieren){
+  box.innerHTML = '';
+  box.classList.remove('lm-bearbeiten-modus');
+
+  const titelzeile = document.createElement('div');
+  titelzeile.className = 'lm-titelzeile';
+
+  const titel = document.createElement('div');
+  titel.className = 'lm-titel';
+  titel.textContent = e.pfad[e.pfad.length-1];
+  titelzeile.appendChild(titel);
+
+  const aktionen = document.createElement('div');
+  aktionen.className = 'lm-aktionen';
+
+  const bearbeitenBtn = document.createElement('button');
+  bearbeitenBtn.className = 'lm-bearbeiten';
+  bearbeitenBtn.textContent = '✏️';
+  bearbeitenBtn.title = 'Diesen Eintrag bearbeiten';
+  bearbeitenBtn.onclick = () => fuelleKnotenBearbeitenFormular(box, e, aufAktualisieren);
+  aktionen.appendChild(bearbeitenBtn);
+
+  const loeschBtn = document.createElement('button');
+  loeschBtn.className = 'lm-loeschen';
+  loeschBtn.textContent = '🗑';
+  loeschBtn.title = 'Diesen Eintrag aus dem Lebensmodell löschen';
+  loeschBtn.onclick = async () => {
+    if(!confirm(`"${e.pfad[e.pfad.length-1]}" wirklich unwiderruflich aus dem Lebensmodell löschen?`)) return;
+    await loescheKnotenUnterPfad(e.pfad);
+    if(aufAktualisieren) await aufAktualisieren();
+  };
+  aktionen.appendChild(loeschBtn);
+
+  titelzeile.appendChild(aktionen);
+  box.appendChild(titelzeile);
+
+  const meta = document.createElement('div');
+  meta.className = 'lm-meta';
+  meta.textContent = `Wichtigkeit ${effektiveWichtigkeit(e)}% (Basis ${e.wichtigkeit}%) · ${e.emotion||'neutral'} · ${e.haeufigkeit||1}x erwähnt · zuletzt vor ${tageSeit(e.aktualisiert_am)} Tag(en) · Verfall: ${e.verfall||'normal'}`;
+  box.appendChild(meta);
+
+  if(e.fakten && e.fakten.length){
+    const ul = document.createElement('ul');
+    for(const f of e.fakten){
+      const li = document.createElement('li');
+      li.textContent = f;
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+  }
+
+  if(e.typ === 'muster' && (e.ausloeser || e.entwicklung)){
+    const zusatz = document.createElement('div');
+    zusatz.className = 'lm-zusatz';
+    zusatz.textContent = [
+      e.ausloeser ? ('Auslöser: ' + e.ausloeser) : null,
+      e.entwicklung ? ('Entwicklung: ' + e.entwicklung) : null
+    ].filter(Boolean).join(' · ');
+    box.appendChild(zusatz);
+  }
+}
+
+// Ersetzt den Inhalt von "box" durch ein Bearbeiten-Formular für Knoten e. Speichern schreibt
+// direkt in IndexedDB und baut danach die gesamte Ansicht neu auf (aufAktualisieren) – auch
+// nötig, weil sich bei geänderter Kategorie/Name die Gruppierung ändern kann. Ändert sich der
+// Pfad (Kategorie und/oder Name), wird der alte Knoten gelöscht und unter dem neuen Pfad neu
+// angelegt, da der Pfad der eindeutige Schlüssel ist – vorher wird auf Kollision geprüft.
+function fuelleKnotenBearbeitenFormular(box, e, aufAktualisieren){
+  box.innerHTML = '';
+  box.classList.add('lm-bearbeiten-modus');
+
+  const kategorieLabel = document.createElement('div');
+  kategorieLabel.className = 'lm-feld-label';
+  kategorieLabel.textContent = 'Kategorie';
+  box.appendChild(kategorieLabel);
+  const kategorieInput = document.createElement('input');
+  kategorieInput.type = 'text';
+  kategorieInput.setAttribute('list', 'lmKategorienListe');
+  kategorieInput.value = e.pfad[0];
+  box.appendChild(kategorieInput);
+
+  const nameLabel = document.createElement('div');
+  nameLabel.className = 'lm-feld-label';
+  nameLabel.textContent = 'Name';
+  box.appendChild(nameLabel);
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = e.pfad[e.pfad.length-1];
+  box.appendChild(nameInput);
+
+  const typLabel = document.createElement('div');
+  typLabel.className = 'lm-feld-label';
+  typLabel.textContent = 'Typ';
+  box.appendChild(typLabel);
+  const typSelect = document.createElement('select');
+  LM_KNOTEN_TYPEN.forEach(opt => {
+    const o = document.createElement('option'); o.value = opt; o.textContent = opt;
+    if((e.typ||'thema') === opt) o.selected = true;
+    typSelect.appendChild(o);
+  });
+  box.appendChild(typSelect);
+
+  const wichtigkeitLabel = document.createElement('div');
+  wichtigkeitLabel.className = 'lm-feld-label';
+  wichtigkeitLabel.textContent = 'Wichtigkeit 0–100 (Basiswert vor Verfall)';
+  box.appendChild(wichtigkeitLabel);
+  const wichtigkeitInput = document.createElement('input');
+  wichtigkeitInput.type = 'number';
+  wichtigkeitInput.min = '0'; wichtigkeitInput.max = '100';
+  wichtigkeitInput.value = e.wichtigkeit != null ? e.wichtigkeit : 50;
+  box.appendChild(wichtigkeitInput);
+
+  const emotionLabel = document.createElement('div');
+  emotionLabel.className = 'lm-feld-label';
+  emotionLabel.textContent = 'Emotion';
+  box.appendChild(emotionLabel);
+  const emotionSelect = document.createElement('select');
+  ['positiv','negativ','neutral','gemischt'].forEach(opt => {
+    const o = document.createElement('option'); o.value = opt; o.textContent = opt;
+    if((e.emotion||'neutral') === opt) o.selected = true;
+    emotionSelect.appendChild(o);
+  });
+  box.appendChild(emotionSelect);
+
+  const verfallLabel = document.createElement('div');
+  verfallLabel.className = 'lm-feld-label';
+  verfallLabel.textContent = 'Verfall';
+  box.appendChild(verfallLabel);
+  const verfallSelect = document.createElement('select');
+  ['nie','langsam','normal','schnell'].forEach(opt => {
+    const o = document.createElement('option'); o.value = opt; o.textContent = opt;
+    if((e.verfall||'normal') === opt) o.selected = true;
+    verfallSelect.appendChild(o);
+  });
+  box.appendChild(verfallSelect);
+
+  const faktenLabel = document.createElement('div');
+  faktenLabel.className = 'lm-feld-label';
+  faktenLabel.textContent = 'Fakten (ein Fakt pro Zeile)';
+  box.appendChild(faktenLabel);
+  const faktenTextarea = document.createElement('textarea');
+  faktenTextarea.rows = Math.max(2, (e.fakten||[]).length);
+  faktenTextarea.value = (e.fakten||[]).join('\n');
+  box.appendChild(faktenTextarea);
+
+  let ausloeserInput = null, entwicklungInput = null;
+  if(e.typ === 'muster'){
+    const al = document.createElement('div'); al.className = 'lm-feld-label'; al.textContent = 'Auslöser';
+    box.appendChild(al);
+    ausloeserInput = document.createElement('input');
+    ausloeserInput.type = 'text'; ausloeserInput.value = e.ausloeser||'';
+    box.appendChild(ausloeserInput);
+
+    const el = document.createElement('div'); el.className = 'lm-feld-label'; el.textContent = 'Entwicklung';
+    box.appendChild(el);
+    entwicklungInput = document.createElement('input');
+    entwicklungInput.type = 'text'; entwicklungInput.value = e.entwicklung||'';
+    box.appendChild(entwicklungInput);
+  }
+
+  const btnZeile = document.createElement('div');
+  btnZeile.className = 'lm-bearbeiten-btnzeile';
+
+  const speichernBtn = document.createElement('button');
+  speichernBtn.className = 'lm-speichern';
+  speichernBtn.textContent = 'Speichern';
+  speichernBtn.onclick = async () => {
+    const neueKategorie = kategorieInput.value.trim();
+    const neuerName = nameInput.value.trim();
+    if(!neueKategorie || !neuerName){ alert('Kategorie und Name dürfen nicht leer sein.'); return; }
+    const neuesPfad = [neueKategorie, ...e.pfad.slice(1, -1), neuerName];
+    const neuerPfadKey = pfadKey(neuesPfad);
+    const neueWichtigkeit = Math.max(0, Math.min(100, parseInt(wichtigkeitInput.value, 10) || 0));
+    const neueFakten = faktenTextarea.value.split('\n').map(f => f.trim()).filter(Boolean);
+    const neuerAusloeser = ausloeserInput ? ausloeserInput.value.trim() : (e.ausloeser||'');
+    const neueEntwicklung = entwicklungInput ? entwicklungInput.value.trim() : (e.entwicklung||'');
+
+    if(neuerPfadKey !== e.pfad_key){
+      const kollision = await holeKnotenNachPfad(neuesPfad);
+      if(kollision){
+        alert(`Unter "${neuesPfad.join(' > ')}" existiert bereits ein anderer Eintrag. Bitte einen anderen Namen bzw. eine andere Kategorie wählen, oder die beiden Einträge von Hand zusammenführen.`);
+        return;
+      }
+      await dbLoeschenNachId('knoten', e.id);
+      await stelleVorfahrenSicher(neuesPfad);
+      await dbHinzufuegen('knoten', {
+        pfad: neuesPfad, pfad_key: neuerPfadKey, typ: typSelect.value,
+        wichtigkeit: neueWichtigkeit, emotion: emotionSelect.value, verfall: verfallSelect.value,
+        haeufigkeit: e.haeufigkeit||1, fakten: neueFakten,
+        ausloeser: neuerAusloeser, entwicklung: neueEntwicklung,
+        erstellt_am: e.erstellt_am, aktualisiert_am: new Date().toISOString()
+      });
+    }else{
+      await dbSetzen('knoten', {
+        ...e, typ: typSelect.value, wichtigkeit: neueWichtigkeit, emotion: emotionSelect.value,
+        verfall: verfallSelect.value, fakten: neueFakten,
+        ausloeser: neuerAusloeser, entwicklung: neueEntwicklung,
+        aktualisiert_am: new Date().toISOString()
+      });
+    }
+    if(aufAktualisieren) await aufAktualisieren();
+  };
+  btnZeile.appendChild(speichernBtn);
+
+  const abbrechenBtn = document.createElement('button');
+  abbrechenBtn.className = 'lm-abbrechen';
+  abbrechenBtn.textContent = 'Abbrechen';
+  abbrechenBtn.onclick = () => fuelleKnotenAnsicht(box, e, aufAktualisieren);
+  btnZeile.appendChild(abbrechenBtn);
+
+  box.appendChild(btnZeile);
+}
+
+// Lese-Ansicht einer einzelnen Stimmung.
+function fuelleStimmungAnsicht(box, s, aufAktualisieren){
+  box.innerHTML = '';
+  box.classList.remove('lm-bearbeiten-modus');
+
+  const span = document.createElement('span');
+  span.textContent = `vor ${tageSeit(s.erstellt_am)} Tag(en) (${s.einschaetzung}): ${s.text}`;
+  box.appendChild(span);
+
+  const aktionen = document.createElement('div');
+  aktionen.className = 'lm-aktionen';
+
+  const bearbeitenBtn = document.createElement('button');
+  bearbeitenBtn.className = 'lm-bearbeiten';
+  bearbeitenBtn.textContent = '✏️';
+  bearbeitenBtn.title = 'Diese Stimmung bearbeiten';
+  bearbeitenBtn.onclick = () => fuelleStimmungBearbeitenFormular(box, s, aufAktualisieren);
+  aktionen.appendChild(bearbeitenBtn);
+
+  const loeschBtn = document.createElement('button');
+  loeschBtn.className = 'lm-loeschen';
+  loeschBtn.textContent = '🗑';
+  loeschBtn.title = 'Diesen Stimmungs-Eintrag löschen';
+  loeschBtn.onclick = async () => {
+    if(!confirm('Diesen Stimmungs-Eintrag wirklich löschen?')) return;
+    await dbLoeschenNachId('stimmungen', s.id);
+    if(aufAktualisieren) await aufAktualisieren();
+  };
+  aktionen.appendChild(loeschBtn);
+
+  box.appendChild(aktionen);
+}
+
+function fuelleStimmungBearbeitenFormular(box, s, aufAktualisieren){
+  box.innerHTML = '';
+  box.classList.add('lm-bearbeiten-modus');
+
+  const textLabel = document.createElement('div');
+  textLabel.className = 'lm-feld-label'; textLabel.textContent = 'Text';
+  box.appendChild(textLabel);
+  const textInput = document.createElement('input');
+  textInput.type = 'text'; textInput.value = s.text || '';
+  box.appendChild(textInput);
+
+  const einLabel = document.createElement('div');
+  einLabel.className = 'lm-feld-label'; einLabel.textContent = 'Einschätzung';
+  box.appendChild(einLabel);
+  const einSelect = document.createElement('select');
+  ['positiv','negativ','neutral'].forEach(opt => {
+    const o = document.createElement('option'); o.value = opt; o.textContent = opt;
+    if((s.einschaetzung||'neutral') === opt) o.selected = true;
+    einSelect.appendChild(o);
+  });
+  box.appendChild(einSelect);
+
+  const btnZeile = document.createElement('div');
+  btnZeile.className = 'lm-bearbeiten-btnzeile';
+
+  const speichernBtn = document.createElement('button');
+  speichernBtn.className = 'lm-speichern';
+  speichernBtn.textContent = 'Speichern';
+  speichernBtn.onclick = async () => {
+    const neuerText = textInput.value.trim();
+    if(!neuerText){ alert('Text darf nicht leer sein.'); return; }
+    await dbSetzen('stimmungen', { ...s, text: neuerText, einschaetzung: einSelect.value });
+    if(aufAktualisieren) await aufAktualisieren();
+  };
+  btnZeile.appendChild(speichernBtn);
+
+  const abbrechenBtn = document.createElement('button');
+  abbrechenBtn.className = 'lm-abbrechen';
+  abbrechenBtn.textContent = 'Abbrechen';
+  abbrechenBtn.onclick = () => fuelleStimmungAnsicht(box, s, aufAktualisieren);
+  btnZeile.appendChild(abbrechenBtn);
+
+  box.appendChild(btnZeile);
+}
+
 function baueLebensmodellDOM(knoten, stimmungen, aufAktualisieren){
   const frag = document.createDocumentFragment();
   const blaetter = (knoten||[]).filter(k => k.typ !== 'ordner' && k.wichtigkeit != null);
@@ -1037,52 +1352,7 @@ function baueLebensmodellDOM(knoten, stimmungen, aufAktualisieren){
     for(const e of eintraege){
       const box = document.createElement('div');
       box.className = 'lm-knoten';
-
-      const titelzeile = document.createElement('div');
-      titelzeile.className = 'lm-titelzeile';
-
-      const titel = document.createElement('div');
-      titel.className = 'lm-titel';
-      titel.textContent = e.pfad[e.pfad.length-1];
-      titelzeile.appendChild(titel);
-
-      const loeschBtn = document.createElement('button');
-      loeschBtn.className = 'lm-loeschen';
-      loeschBtn.textContent = '🗑';
-      loeschBtn.title = 'Diesen Eintrag aus dem Lebensmodell löschen';
-      loeschBtn.onclick = async () => {
-        if(!confirm(`"${e.pfad[e.pfad.length-1]}" wirklich unwiderruflich aus dem Lebensmodell löschen?`)) return;
-        await loescheKnotenUnterPfad(e.pfad);
-        if(aufAktualisieren) await aufAktualisieren();
-      };
-      titelzeile.appendChild(loeschBtn);
-      box.appendChild(titelzeile);
-
-      const meta = document.createElement('div');
-      meta.className = 'lm-meta';
-      meta.textContent = `Wichtigkeit ${effektiveWichtigkeit(e)}% (Basis ${e.wichtigkeit}%) · ${e.emotion||'neutral'} · ${e.haeufigkeit||1}x erwähnt · zuletzt vor ${tageSeit(e.aktualisiert_am)} Tag(en) · Verfall: ${e.verfall||'normal'}`;
-      box.appendChild(meta);
-
-      if(e.fakten && e.fakten.length){
-        const ul = document.createElement('ul');
-        for(const f of e.fakten){
-          const li = document.createElement('li');
-          li.textContent = f;
-          ul.appendChild(li);
-        }
-        box.appendChild(ul);
-      }
-
-      if(e.typ === 'muster' && (e.ausloeser || e.entwicklung)){
-        const zusatz = document.createElement('div');
-        zusatz.className = 'lm-zusatz';
-        zusatz.textContent = [
-          e.ausloeser ? ('Auslöser: ' + e.ausloeser) : null,
-          e.entwicklung ? ('Entwicklung: ' + e.entwicklung) : null
-        ].filter(Boolean).join(' · ');
-        box.appendChild(zusatz);
-      }
-
+      fuelleKnotenAnsicht(box, e, aufAktualisieren);
       frag.appendChild(box);
     }
   }
@@ -1095,22 +1365,7 @@ function baueLebensmodellDOM(knoten, stimmungen, aufAktualisieren){
     for(const s of stimmungen.slice(-5).reverse()){
       const box = document.createElement('div');
       box.className = 'lm-stimmung';
-
-      const span = document.createElement('span');
-      span.textContent = `vor ${tageSeit(s.erstellt_am)} Tag(en) (${s.einschaetzung}): ${s.text}`;
-      box.appendChild(span);
-
-      const loeschBtn = document.createElement('button');
-      loeschBtn.className = 'lm-loeschen';
-      loeschBtn.textContent = '🗑';
-      loeschBtn.title = 'Diesen Stimmungs-Eintrag löschen';
-      loeschBtn.onclick = async () => {
-        if(!confirm('Diesen Stimmungs-Eintrag wirklich löschen?')) return;
-        await dbLoeschenNachId('stimmungen', s.id);
-        if(aufAktualisieren) await aufAktualisieren();
-      };
-      box.appendChild(loeschBtn);
-
+      fuelleStimmungAnsicht(box, s, aufAktualisieren);
       frag.appendChild(box);
     }
   }
