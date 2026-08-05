@@ -128,8 +128,10 @@
 
     <div style="margin-top:12px;">KI-Anbieter</div>
     <select id="anbieterSelect">
-      <option value="groq">Kostenlose Kette: Groq → Mistral → Claude</option>
-      <option value="anthropic">Nur Anthropic (Claude, bezahlt)</option>
+      <option value="kette">Kostenlose Kette: Groq → Mistral → Claude</option>
+      <option value="groq">Nur Groq (kostenlos)</option>
+      <option value="mistral">Nur Mistral (kostenlos)</option>
+      <option value="anthropic">Nur Claude (bezahlt)</option>
     </select>
 
     <div>Groq API Key</div>
@@ -138,7 +140,7 @@
     <input id="mistralKey" placeholder="...">
     <div>Anthropic API Key</div>
     <input id="antKey" placeholder="sk-ant-...">
-    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Mistral, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Anthropic (Claude, kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Unter jeder Antwort steht klein, welcher Anbieter geantwortet hat. Alle drei Keys können gleichzeitig eingetragen bleiben. Das Wetter-Werkzeug funktioniert aktuell nur mit Anthropic.</div>
+    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Mistral, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Claude (kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Bei "Nur Groq", "Nur Mistral" oder "Nur Claude" wird ausschließlich dieser eine Anbieter genutzt, ohne automatischen Wechsel bei Kontingent-Ende. Unter jeder Antwort steht klein, welcher Anbieter tatsächlich geantwortet hat. Alle drei Keys können gleichzeitig eingetragen bleiben, auch wenn nur einer aktiv genutzt wird. Das Wetter-Werkzeug und die Archiv-Suche funktionieren aktuell nur mit Claude – bei einer Wetterfrage schaltet die App in allen anderen Fällen kurz automatisch auf Claude um, sofern ein Anthropic-Key hinterlegt ist.</div>
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Dein Lebensmodell (Personen, Themen, Muster, Stimmungen, das komplette Gesprächsarchiv) wird ausschließlich lokal in diesem Browser gespeichert (IndexedDB) – niemals in der Cloud. Nur Termine/Erinnerungen und Push-Anmeldungen laufen weiterhin über Supabase, damit Benachrichtigungen geräteübergreifend funktionieren. Für die eigentliche Verarbeitung (Antworten, Auswertung neuer Nachrichten) werden Texte wie bisher direkt an den gewählten KI-Anbieter geschickt.</div>
@@ -194,16 +196,29 @@ function getKeys(){
     mistralKey: localStorage.getItem('halt_mistral_key') || ''
   };
 }
+// Einmalige, stille Migration: In alten Versionen bedeutete der gespeicherte Wert "groq"
+// noch "Kostenlose Kette" (die einzige kostenlose Option gab es nur als Kette, "Nur Groq"
+// als eigene Auswahl gab es noch nicht). Damit bestehende Einstellungen nicht plötzlich auf
+// "Nur Groq" ohne Fallback springen, wird das einmalig auf den neuen Kette-Wert umgemappt.
+(function migriereAltenAnbieterWert(){
+  if(localStorage.getItem('halt_anbieter') === 'groq' && !localStorage.getItem('halt_anbieter_migriert')){
+    localStorage.setItem('halt_anbieter', 'kette');
+  }
+  localStorage.setItem('halt_anbieter_migriert', '1');
+})();
 function aktiverAnbieter(){
   const gespeichert = localStorage.getItem('halt_anbieter');
-  if(!gespeichert || gespeichert === 'lokal') return 'groq';
+  if(!gespeichert || gespeichert === 'lokal') return 'kette';
   return gespeichert;
 }
 function keysComplete(){
   const k = getKeys();
   if(!k.sbUrl || !k.sbKey) return false;
-  if(aktiverAnbieter() === 'groq') return !!k.groqKey;
-  return !!k.antKey;
+  const anbieter = aktiverAnbieter();
+  if(anbieter === 'groq') return !!k.groqKey;
+  if(anbieter === 'mistral') return !!k.mistralKey;
+  if(anbieter === 'anthropic') return !!k.antKey;
+  return !!(k.groqKey || k.mistralKey || k.antKey); // 'kette': mindestens ein Key reicht
 }
 $('anbieterSelect').addEventListener('change', () => {
   localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
@@ -491,13 +506,15 @@ async function ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools){
   }
 }
 
-// ---------- Einheitlicher LLM-Aufruf: versucht die kostenlose Kette Groq -> Mistral -> Claude ----------
+// ---------- Einheitlicher LLM-Aufruf ----------
 // modellVariante: 'haupt' (normale Chat-Antwort) oder 'extraktion' (Hintergrund-Extraktion).
 // anbieterOverride erzwingt EINEN bestimmten Anbieter direkt (z.B. für Wetter-Fragen, die nur
-// Claude per Werkzeug beantworten kann) und überspringt die Kette komplett.
-// Ohne Override wird versucht: Groq zuerst (kostenlos), bei Kontingent-Fehler weiter zu Mistral
-// (ebenfalls kostenlos), erst wenn auch das ausgeschöpft ist als letzter Ausweg Claude (bezahlt) –
-// jeweils nur, wenn der entsprechende Key überhaupt hinterlegt ist.
+// Claude per Werkzeug beantworten kann) und überspringt die sonstige Anbieter-Logik komplett.
+// Ohne Override richtet sich der Aufruf nach der Einstellung in aktiverAnbieter():
+// 'groq' / 'mistral' / 'anthropic' rufen ausschließlich diesen einen Anbieter auf (kein
+// automatischer Wechsel bei Kontingent-Ende). 'kette' versucht Groq zuerst (kostenlos), bei
+// Kontingent-Fehler weiter zu Mistral (ebenfalls kostenlos), erst wenn auch das ausgeschöpft
+// ist als letzter Ausweg Claude (bezahlt) – jeweils nur, wenn der entsprechende Key hinterlegt ist.
 async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbieterOverride, modellVariante='haupt'){
   const k = getKeys();
 
@@ -511,12 +528,24 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
     return text;
   }
 
-  if(aktiverAnbieter() === 'anthropic'){
+  const gewaehlt = aktiverAnbieter();
+  if(gewaehlt === 'anthropic'){
     const text = await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
     letzterAntwortAnbieter = 'anthropic';
     return text;
   }
+  if(gewaehlt === 'groq'){
+    const text = await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante);
+    letzterAntwortAnbieter = 'groq';
+    return text;
+  }
+  if(gewaehlt === 'mistral'){
+    const text = await ruftMistralAuf(systemPrompt, messages, maxTokens);
+    letzterAntwortAnbieter = 'mistral';
+    return text;
+  }
 
+  // 'kette': Groq -> Mistral -> Claude, jeweils nur bei hinterlegtem Key
   const kette = [];
   if(k.groqKey) kette.push('groq');
   if(k.mistralKey) kette.push('mistral');
@@ -1160,7 +1189,10 @@ async function sendeNachricht(text){
   $('textInput').value = '';
   $('textInput').style.height = 'auto';
 
-  const brauchtWetterUmschaltung = istWetterFrage(text) && aktiverAnbieter() === 'groq' && getKeys().antKey;
+  // Wetter (und Archiv-Suche) laufen technisch nur über Claudes Werkzeug-Aufrufe – bei jedem
+  // anderen gewählten Anbieter (Kette, Nur Groq, Nur Mistral) schalten wir für eine Wetterfrage
+  // kurz automatisch auf Claude um, sofern ein Anthropic-Key hinterlegt ist.
+  const brauchtWetterUmschaltung = istWetterFrage(text) && aktiverAnbieter() !== 'anthropic' && getKeys().antKey;
   if(brauchtWetterUmschaltung){
     const hinweis = document.createElement('div');
     hinweis.className = 'system-hinweis';
