@@ -131,6 +131,7 @@
       <option value="kette">Kostenlose Kette: Groq → Mistral → Claude</option>
       <option value="groq">Nur Groq (kostenlos)</option>
       <option value="mistral">Nur Mistral (kostenlos)</option>
+      <option value="deepseek">Nur DeepSeek (günstig)</option>
       <option value="anthropic">Nur Claude (bezahlt)</option>
     </select>
 
@@ -138,9 +139,11 @@
     <input id="groqKey" placeholder="gsk_...">
     <div>Mistral API Key</div>
     <input id="mistralKey" placeholder="...">
+    <div>DeepSeek API Key</div>
+    <input id="deepseekKey" placeholder="sk-...">
     <div>Anthropic API Key</div>
     <input id="antKey" placeholder="sk-ant-...">
-    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Mistral, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Claude (kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Bei "Nur Groq", "Nur Mistral" oder "Nur Claude" wird ausschließlich dieser eine Anbieter genutzt, ohne automatischen Wechsel bei Kontingent-Ende. Unter jeder Antwort steht klein, welcher Anbieter tatsächlich geantwortet hat. Alle drei Keys können gleichzeitig eingetragen bleiben, auch wenn nur einer aktiv genutzt wird. Das Wetter-Werkzeug und die Archiv-Suche funktionieren aktuell nur mit Claude – bei einer Wetterfrage schaltet die App in allen anderen Fällen kurz automatisch auf Claude um, sofern ein Anthropic-Key hinterlegt ist.</div>
+    <div class="hint">Bei "Kostenlose Kette" probiert die App bei jeder Antwort zuerst Groq, bei ausgeschöpftem Kontingent automatisch Mistral, und erst wenn auch das ausgeschöpft ist als letzten Ausweg Claude (kostet dann etwas) – jeweils nur, wenn der entsprechende Key eingetragen ist. Bei "Nur Groq", "Nur Mistral", "Nur DeepSeek" oder "Nur Claude" wird ausschließlich dieser eine Anbieter genutzt, ohne automatischen Wechsel bei Kontingent-Ende. Unter jeder Antwort steht klein, welcher Anbieter tatsächlich geantwortet hat. Alle Keys können gleichzeitig eingetragen bleiben, auch wenn nur einer aktiv genutzt wird. Das Wetter-Werkzeug und die Archiv-Suche funktionieren aktuell nur mit Claude – bei einer Wetterfrage schaltet die App in allen anderen Fällen kurz automatisch auf Claude um, sofern ein Anthropic-Key hinterlegt ist.</div>
 
     <button id="saveKeys">Speichern</button>
     <div class="hint">Die Keys bleiben nur lokal in deinem Browser (localStorage). Dein Lebensmodell (Personen, Themen, Muster, Stimmungen, das komplette Gesprächsarchiv) wird ausschließlich lokal in diesem Browser gespeichert (IndexedDB) – niemals in der Cloud. Nur Termine/Erinnerungen und Push-Anmeldungen laufen weiterhin über Supabase, damit Benachrichtigungen geräteübergreifend funktionieren. Für die eigentliche Verarbeitung (Antworten, Auswertung neuer Nachrichten) werden Texte wie bisher direkt an den gewählten KI-Anbieter geschickt.</div>
@@ -193,7 +196,8 @@ function getKeys(){
     sbKey: localStorage.getItem('halt_sb_key') || '',
     antKey: localStorage.getItem('halt_ant_key') || '',
     groqKey: localStorage.getItem('halt_groq_key') || '',
-    mistralKey: localStorage.getItem('halt_mistral_key') || ''
+    mistralKey: localStorage.getItem('halt_mistral_key') || '',
+    deepseekKey: localStorage.getItem('halt_deepseek_key') || ''
   };
 }
 // Einmalige, stille Migration: In alten Versionen bedeutete der gespeicherte Wert "groq"
@@ -217,6 +221,7 @@ function keysComplete(){
   const anbieter = aktiverAnbieter();
   if(anbieter === 'groq') return !!k.groqKey;
   if(anbieter === 'mistral') return !!k.mistralKey;
+  if(anbieter === 'deepseek') return !!k.deepseekKey;
   if(anbieter === 'anthropic') return !!k.antKey;
   return !!(k.groqKey || k.mistralKey || k.antKey); // 'kette': mindestens ein Key reicht
 }
@@ -230,6 +235,7 @@ $('settingsBtn').onclick = () => {
   const k = getKeys();
   $('sbUrl').value = k.sbUrl; $('sbKey').value = k.sbKey;
   $('antKey').value = k.antKey; $('groqKey').value = k.groqKey; $('mistralKey').value = k.mistralKey;
+  $('deepseekKey').value = k.deepseekKey;
   $('anbieterSelect').value = aktiverAnbieter();
 };
 $('saveKeys').onclick = () => {
@@ -238,6 +244,7 @@ $('saveKeys').onclick = () => {
   localStorage.setItem('halt_ant_key', $('antKey').value.trim());
   localStorage.setItem('halt_groq_key', $('groqKey').value.trim());
   localStorage.setItem('halt_mistral_key', $('mistralKey').value.trim());
+  localStorage.setItem('halt_deepseek_key', $('deepseekKey').value.trim());
   localStorage.setItem('halt_anbieter', $('anbieterSelect').value);
   $('setup').style.display = 'none';
   init();
@@ -382,7 +389,7 @@ const werkzeuge = [
 let letzterAntwortAnbieter = null;
 
 function anbieterLabel(code){
-  return { groq: 'Groq', mistral: 'Mistral', anthropic: 'Claude' }[code] || code;
+  return { groq: 'Groq', mistral: 'Mistral', deepseek: 'DeepSeek', anthropic: 'Claude' }[code] || code;
 }
 
 // Prüft anbieterunabhängig, ob eine Antwort auf ein Rate-/Kontingent-Limit hindeutet
@@ -447,6 +454,33 @@ async function ruftMistralAuf(systemPrompt, messages, maxTokens){
   }
   if(!res.ok || data.error){
     throw new Error((data.error && data.error.message) || `Mistral HTTP ${res.status}`);
+  }
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// ---------- DeepSeek ----------
+// Ebenfalls ohne Werkzeug-Unterstützung (Wetter/Archiv-Suche), wie Groq und Mistral.
+// DeepSeeks Chat-API ist ebenfalls OpenAI-kompatibel (gleiche Rollen user/assistant/system).
+async function ruftDeepseekAuf(systemPrompt, messages, maxTokens){
+  const k = getKeys();
+  const body = {
+    model: 'deepseek-chat',
+    max_tokens: maxTokens,
+    messages: systemPrompt ? [{role:'system', content:systemPrompt}, ...messages] : messages
+  };
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
+    method:'POST',
+    headers:{'Content-Type':'application/json', 'Authorization': `Bearer ${k.deepseekKey}`},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if(istKontingentFehler(res.status, data)){
+    const fehler = new Error((data.error && data.error.message) || 'DeepSeek-Kontingent erschöpft');
+    fehler.kontingent = true;
+    throw fehler;
+  }
+  if(!res.ok || data.error){
+    throw new Error((data.error && data.error.message) || `DeepSeek HTTP ${res.status}`);
   }
   return data.choices?.[0]?.message?.content || '';
 }
@@ -521,9 +555,11 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
   if(anbieterOverride){
     const text = anbieterOverride === 'mistral'
       ? await ruftMistralAuf(systemPrompt, messages, maxTokens)
-      : anbieterOverride === 'groq'
-        ? await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante)
-        : await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
+      : anbieterOverride === 'deepseek'
+        ? await ruftDeepseekAuf(systemPrompt, messages, maxTokens)
+        : anbieterOverride === 'groq'
+          ? await ruftGroqAuf(systemPrompt, messages, maxTokens, modellVariante)
+          : await ruftAnthropicAuf(systemPrompt, messages, maxTokens, mitTools);
     letzterAntwortAnbieter = anbieterOverride;
     return text;
   }
@@ -542,6 +578,11 @@ async function chatCompletion(systemPrompt, messages, maxTokens, mitTools, anbie
   if(gewaehlt === 'mistral'){
     const text = await ruftMistralAuf(systemPrompt, messages, maxTokens);
     letzterAntwortAnbieter = 'mistral';
+    return text;
+  }
+  if(gewaehlt === 'deepseek'){
+    const text = await ruftDeepseekAuf(systemPrompt, messages, maxTokens);
+    letzterAntwortAnbieter = 'deepseek';
     return text;
   }
 
