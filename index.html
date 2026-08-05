@@ -93,10 +93,17 @@
   #lebensmodellAnsicht .lm-knoten{margin:6px 0 0 4px;padding:9px 11px;background:var(--bg-card);
     border:1px solid var(--border);border-radius:9px;}
   #lebensmodellAnsicht .lm-titel{font-weight:600;font-size:13px;color:var(--text);}
+  #lebensmodellAnsicht .lm-titelzeile{display:flex;align-items:center;justify-content:space-between;gap:8px;}
   #lebensmodellAnsicht .lm-meta{font-size:11px;color:var(--text-faint);margin:2px 0 5px;}
   #lebensmodellAnsicht ul{margin:0;padding-left:16px;font-size:12.5px;}
   #lebensmodellAnsicht .lm-zusatz{font-size:11.5px;color:var(--text-faint);margin-top:5px;}
-  #lebensmodellAnsicht .lm-stimmung{margin:6px 0 0 4px;font-size:12.5px;color:var(--text-dim);}
+  #lebensmodellAnsicht .lm-stimmung{margin:6px 0 0 4px;padding:9px 11px;background:var(--bg-card);
+    border:1px solid var(--border);border-radius:9px;font-size:12.5px;color:var(--text-dim);
+    display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  #lebensmodellAnsicht .lm-stimmung span{flex:1;}
+  #lebensmodellAnsicht .lm-loeschen{background:none;border:none;color:var(--text-faint);
+    cursor:pointer;font-size:14px;padding:2px 4px;flex-shrink:0;line-height:1;}
+  #lebensmodellAnsicht .lm-loeschen:hover{color:var(--danger);}
 </style>
 </head>
 <body>
@@ -154,7 +161,7 @@
     <div class="hint">Geht das komplette bisherige Gespräch (aus dem lokalen Archiv) nochmal durch und trägt im Lebensmodell nach, was die laufende Extraktion verpasst hat. Kann je nach Länge etwas dauern und ein paar Cent an API-Kosten verursachen.</div>
 
     <button id="lebensmodellBtn" class="sekundaer">Lebensmodell ansehen</button>
-    <div class="hint">Zeigt, was die App bisher über dich (bzw. die Testperson) gelernt hat – mit Wichtigkeit, Emotion, Häufigkeit und Verfall.</div>
+    <div class="hint">Zeigt, was die App bisher über dich (bzw. die Testperson) gelernt hat – mit Wichtigkeit, Emotion, Häufigkeit und Verfall. Über das 🗑-Symbol an jedem Eintrag kannst du falsch abgespeicherte Dinge direkt hier entfernen.</div>
 
     <hr>
     <button id="testdatenBtn" class="sekundaer">Fiktive Testdaten laden</button>
@@ -745,7 +752,23 @@ async function holeKnotenNachPfad(pfad){
 async function loescheKnotenUnterPfad(pfad){
   const zielKey = pfadKey(pfad);
   const alle = await dbAlle('knoten');
-  const treffer = alle.filter(k => k.pfad_key === zielKey || k.pfad_key.startsWith(zielKey + ' > '));
+  let treffer = alle.filter(k => k.pfad_key === zielKey || k.pfad_key.startsWith(zielKey + ' > '));
+
+  // Fallback, falls die KI den Pfad nicht exakt wie gespeichert trifft (z.B. andere Schreibweise
+  // oder ein Knoten, der ihr beim Löschversuch gar nicht bekannt war): dann stattdessen über das
+  // letzte Pfad-Segment (den eigentlichen Namen) suchen. Nur greift, wenn die exakte Suche nichts
+  // gefunden hat, und nur ab 3 Zeichen, um zu breite Zufallstreffer zu vermeiden.
+  if(!treffer.length && pfad.length){
+    const ziel = String(pfad[pfad.length-1]).trim().toLowerCase();
+    if(ziel.length >= 3){
+      treffer = alle.filter(k => {
+        const letzter = String(k.pfad[k.pfad.length-1]||'').trim().toLowerCase();
+        if(!letzter) return false;
+        return letzter === ziel || (letzter.length >= 3 && (letzter.includes(ziel) || ziel.includes(letzter)));
+      });
+    }
+  }
+
   for(const k of treffer){ await dbLoeschenNachId('knoten', k.id); }
   return treffer;
 }
@@ -987,7 +1010,10 @@ async function pruefeErstlauf(){
 }
 
 // ---------- Lebensmodell-Ansicht (Test-/Debug-View) ----------
-function baueLebensmodellDOM(knoten, stimmungen){
+// aufAktualisieren: Callback, der nach einer manuellen Löschung die Ansicht neu aufbaut
+// (damit falsch abgespeicherte Einträge direkt hier korrigiert werden können, unabhängig
+// davon, ob die KI eine Löschbitte im Chat sauber erkennt).
+function baueLebensmodellDOM(knoten, stimmungen, aufAktualisieren){
   const frag = document.createDocumentFragment();
   const blaetter = (knoten||[]).filter(k => k.typ !== 'ordner' && k.wichtigkeit != null);
 
@@ -1012,10 +1038,25 @@ function baueLebensmodellDOM(knoten, stimmungen){
       const box = document.createElement('div');
       box.className = 'lm-knoten';
 
+      const titelzeile = document.createElement('div');
+      titelzeile.className = 'lm-titelzeile';
+
       const titel = document.createElement('div');
       titel.className = 'lm-titel';
       titel.textContent = e.pfad[e.pfad.length-1];
-      box.appendChild(titel);
+      titelzeile.appendChild(titel);
+
+      const loeschBtn = document.createElement('button');
+      loeschBtn.className = 'lm-loeschen';
+      loeschBtn.textContent = '🗑';
+      loeschBtn.title = 'Diesen Eintrag aus dem Lebensmodell löschen';
+      loeschBtn.onclick = async () => {
+        if(!confirm(`"${e.pfad[e.pfad.length-1]}" wirklich unwiderruflich aus dem Lebensmodell löschen?`)) return;
+        await loescheKnotenUnterPfad(e.pfad);
+        if(aufAktualisieren) await aufAktualisieren();
+      };
+      titelzeile.appendChild(loeschBtn);
+      box.appendChild(titelzeile);
 
       const meta = document.createElement('div');
       meta.className = 'lm-meta';
@@ -1054,7 +1095,22 @@ function baueLebensmodellDOM(knoten, stimmungen){
     for(const s of stimmungen.slice(-5).reverse()){
       const box = document.createElement('div');
       box.className = 'lm-stimmung';
-      box.textContent = `vor ${tageSeit(s.erstellt_am)} Tag(en) (${s.einschaetzung}): ${s.text}`;
+
+      const span = document.createElement('span');
+      span.textContent = `vor ${tageSeit(s.erstellt_am)} Tag(en) (${s.einschaetzung}): ${s.text}`;
+      box.appendChild(span);
+
+      const loeschBtn = document.createElement('button');
+      loeschBtn.className = 'lm-loeschen';
+      loeschBtn.textContent = '🗑';
+      loeschBtn.title = 'Diesen Stimmungs-Eintrag löschen';
+      loeschBtn.onclick = async () => {
+        if(!confirm('Diesen Stimmungs-Eintrag wirklich löschen?')) return;
+        await dbLoeschenNachId('stimmungen', s.id);
+        if(aufAktualisieren) await aufAktualisieren();
+      };
+      box.appendChild(loeschBtn);
+
       frag.appendChild(box);
     }
   }
@@ -1062,11 +1118,15 @@ function baueLebensmodellDOM(knoten, stimmungen){
   return frag;
 }
 
-$('lebensmodellBtn').onclick = async () => {
+async function aktualisiereLebensmodellAnsicht(){
   aktuellesGedaechtnis = await ladeGedaechtnis();
   const inhalt = $('lebensmodellInhalt');
   inhalt.innerHTML = '';
-  inhalt.appendChild(baueLebensmodellDOM(aktuellesGedaechtnis.knoten, aktuellesGedaechtnis.stimmungen));
+  inhalt.appendChild(baueLebensmodellDOM(aktuellesGedaechtnis.knoten, aktuellesGedaechtnis.stimmungen, aktualisiereLebensmodellAnsicht));
+}
+
+$('lebensmodellBtn').onclick = async () => {
+  await aktualisiereLebensmodellAnsicht();
   $('setup').style.display = 'none';
   $('lebensmodellAnsicht').style.display = 'block';
 };
@@ -1346,7 +1406,7 @@ Wichtige Regeln:
 - "neue_muster" NUR, wenn Jonas selbst explizit signalisiert, dass etwas wiederkehrend ist (Formulierungen wie "das ist bei mir immer so", "passiert mir öfter", "seit Monaten schon", "das kommt immer wieder"). Ein einzelnes Erwähnen, auch wenn es ernst ist, ist KEIN Muster – das gehört stattdessen als normale "aktualisierung". Sei hier sehr zurückhaltend. Bereits bekannte Muster: ${bekannteMusterText}. Bei erneuter Erwähnung eines bekannten Musters denselben "thema"-Namen zurückgeben.
 - "stimmung" NUR setzen, wenn Jonas in der neuesten Nachricht erkennbar über seine aktuelle Stimmung/Verfassung schreibt (gut, schlecht, gestresst, erschöpft etc.) – sonst weglassen (null lassen bzw. Feld weglassen). "vermutete_ursachen_pfade" nur, wenn im Kontext ein plausibler Zusammenhang erkennbar ist (z.B. Streit, wenig Schlaf, viel Arbeit) – rate nicht wild, im Zweifel leer lassen.
 - Termine mit einem konkreten Datum oder uhrzeitgenaue Kurzzeit-Erinnerungen NICHT hier verarbeiten (das läuft über einen separaten Prozess) – ignoriere Formulierungen wie "erinnere mich in 10 Minuten" komplett in dieser Antwort. Bereits vorhandene, noch nicht fällige Erinnerungen (nur zur Einordnung, hier nichts draus ableiten): ${bekannteErinnerungenText}.
-- "loeschungen" NUR, wenn Jonas in der neuesten Nachricht EINDEUTIG und EXPLIZIT darum bittet, etwas zu löschen/vergessen (Formulierungen wie "lösch das", "vergiss, dass ich...", "das musst du dir nicht merken", "lösch alles zum Thema X"). Der "pfad" MUSS exakt einem der bereits bekannten Knoten entsprechen (siehe Liste oben) – erfinde keinen neuen Pfad zum Löschen und rate nicht, welcher Knoten gemeint sein könnte, wenn es nicht eindeutig ist. Ein Löschwunsch zu einer ganzen Kategorie oder einem Oberthema (z.B. "vergiss alles über meine Familie") darf den kompletten Pfad bis zu dieser Ebene angeben (z.B. ["Familie"]) – das entfernt dann automatisch auch alle darunterliegenden Knoten. Im Zweifel: nichts löschen.
+- "loeschungen" NUR, wenn Jonas in der neuesten Nachricht EINDEUTIG und EXPLIZIT darum bittet, etwas zu löschen/vergessen (Formulierungen wie "lösch das", "vergiss, dass ich...", "das musst du dir nicht merken", "lösch alles zum Thema X"). Nutze wenn möglich exakt den Pfad eines bereits bekannten Knotens (siehe Liste oben). Steht der genannte Knoten nicht in dieser Liste oder bist du dir bei der genauen Schreibweise unsicher, gib trotzdem deinen besten Pfad-Vorschlag an – wichtig ist vor allem, dass zumindest das letzte Pfad-Element (der Name) möglichst genau der Formulierung von Jonas entspricht, denn danach wird notfalls auch unabhängig von der Liste gesucht. Rate aber NICHT, WELCHER Knoten gemeint sein könnte, wenn Jonas das Ziel nicht klar genug benennt – dann lieber gar nichts löschen. Ein Löschwunsch zu einer ganzen Kategorie oder einem Oberthema (z.B. "vergiss alles über meine Familie") darf den kompletten Pfad bis zu dieser Ebene angeben (z.B. ["Familie"]) – das entfernt dann automatisch auch alle darunterliegenden Knoten. Im Zweifel: nichts löschen.
 - Erfinde nichts. Lasse Arrays leer bzw. "stimmung" weg, wenn nichts Eindeutiges erkennbar ist.
 
 Gesprächsausschnitt:
@@ -1437,7 +1497,7 @@ async function verarbeiteAusschnitt(transkript){
   const bekannteKnotenText = (aktuellesGedaechtnis.knoten||[])
     .filter(k => k.typ !== 'ordner' && k.wichtigkeit != null)
     .sort((a,b) => effektiveWichtigkeit(b) - effektiveWichtigkeit(a))
-    .slice(0, 30)
+    .slice(0, 50)
     .map(k => `${k.pfad.join(' > ')} (${k.wichtigkeit}%)`).join('; ') || 'keine bisher';
   const bekannteErinnerungenText = (aktuellesGedaechtnis.zeitErinnerungen||[]).map(z=>z.text).join(', ') || 'keine bisher';
   const bekannteMusterText = (aktuellesGedaechtnis.knoten||[])
@@ -1471,15 +1531,26 @@ async function verarbeiteAusschnitt(transkript){
     }
 
     const geloeschteNamen = [];
+    const nichtGefundenNamen = [];
     for(const l of parsed.loeschungen||[]){
       if(!l.pfad || !l.pfad.length) continue;
       const entfernt = await loescheKnotenUnterPfad(l.pfad);
       if(entfernt.length) geloeschteNamen.push(l.pfad[l.pfad.length-1]);
+      else nichtGefundenNamen.push(l.pfad[l.pfad.length-1]);
     }
     if(geloeschteNamen.length){
       const hinweis = document.createElement('div');
       hinweis.className = 'system-hinweis';
       hinweis.textContent = `🗑️ Aus dem Lebensmodell entfernt: ${geloeschteNamen.join(', ')}`;
+      $('thread').appendChild(hinweis);
+    }
+    // Explizite Rückmeldung, wenn ein Löschwunsch NICHT umgesetzt werden konnte – bisher blieb
+    // das unsichtbar, sodass es so aussah, als hätte es geklappt, obwohl der Eintrag unverändert
+    // im Lebensmodell blieb und später wieder auftauchte.
+    if(nichtGefundenNamen.length){
+      const hinweis = document.createElement('div');
+      hinweis.className = 'system-hinweis';
+      hinweis.textContent = `⚠️ "${nichtGefundenNamen.join(', ')}" konnte ich im Lebensmodell nicht eindeutig finden – schau ggf. unter ⚙️ → "Lebensmodell ansehen" nach und lösch es dort direkt über 🗑.`;
       $('thread').appendChild(hinweis);
     }
 
